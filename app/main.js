@@ -1263,17 +1263,31 @@ function applyCropOverlay() {
     h: r.h / ih
   };
 
-  if (menuScaleWidthCm && cropTargetWidthCm && cropTargetWidthCm.value) {
-    menuScaleWidthCm.value = cropTargetWidthCm.value;
-  }
-  if (menuScaleHeightCm && cropTargetHeightCm && cropTargetHeightCm.value) {
-    menuScaleHeightCm.value = cropTargetHeightCm.value;
+  // Placement-Dimensionen so anpassen, dass kein Strecken entsteht.
+  // cropAspectWH = W/H des Ausschnitts auf dem Bogen (berücksichtigt Rotation).
+  const cropAspectWH = getPlacementAspectRatio(selected);
+  const targetW = Number(cropTargetWidthCm?.value || 0);
+  const targetH = Number(cropTargetHeightCm?.value || 0);
+
+  if (targetW > 0 && targetH > 0) {
+    // Explizite Zielgrösse übernehmen
+    selected.widthMm = targetW * MM_PER_CM;
+    selected.heightMm = targetH * MM_PER_CM;
+  } else if (targetW > 0) {
+    selected.widthMm = targetW * MM_PER_CM;
+    selected.heightMm = selected.widthMm / Math.max(1e-6, cropAspectWH);
+  } else if (targetH > 0) {
+    selected.heightMm = targetH * MM_PER_CM;
+    selected.widthMm = selected.heightMm * cropAspectWH;
+  } else {
+    // Keine Zielgrösse: Breite beibehalten, Höhe aus Ausschnitt-Verhältnis ableiten
+    selected.heightMm = selected.widthMm / Math.max(1e-6, cropAspectWH);
   }
 
   closeCropOverlay();
   updateManualScaleControlsForSelected();
   drawPreview();
-  setStatus('Beschnitt uebernommen. Druckgroesse bleibt separat ueber Zielbreite/Zielhoehe steuerbar.');
+  setStatus('Beschnitt uebernommen.');
 }
 
 function canPlaceCandidate(candidate, pagePlacements, config, ignoreId = null) {
