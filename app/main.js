@@ -95,6 +95,8 @@ const cropRectXPercent = document.getElementById('cropRectXPercent');
 const cropRectYPercent = document.getElementById('cropRectYPercent');
 const cropRectWPercent = document.getElementById('cropRectWPercent');
 const cropRectHPercent = document.getElementById('cropRectHPercent');
+const cropRatioH = document.getElementById('cropRatioH');
+const cropRatioW = document.getElementById('cropRatioW');
 
 const overlayView = {
   scale: 1,
@@ -960,6 +962,52 @@ function buildRectFromHandleDrag(handle, anchor, pointer, iw, ih) {
   return clampCropRect({ x, y, w, h }, iw, ih);
 }
 
+// Ratio-Inputs aus aktuellem Crop-Rect aktualisieren (normiert: max(H,W) = 10)
+function updateRatioInputsFromRect() {
+  if (!cropEditor.active || !cropRatioH || !cropRatioW) return;
+  // Nicht überschreiben, solange der Nutzer in den Ratio-Feldern tippt
+  if (document.activeElement === cropRatioH || document.activeElement === cropRatioW) return;
+  const h = cropEditor.rect.h;
+  const w = cropEditor.rect.w;
+  if (h <= 0 || w <= 0) return;
+  const factor = 10 / Math.max(h, w);
+  cropRatioH.value = (h * factor).toFixed(2);
+  cropRatioW.value = (w * factor).toFixed(2);
+}
+
+// Ratio aus Ratio-Inputs auf das Crop-Rect anwenden (Mittelpunkt bleibt, Grösse passt sich an)
+function applyCropRatioFromInputs() {
+  if (!cropEditor.active) return;
+  const selected = getSelectedPlacement();
+  if (!selected) return;
+  const rH = Number(cropRatioH?.value || 0);
+  const rW = Number(cropRatioW?.value || 0);
+  if (rH <= 0 || rW <= 0) return;
+
+  const iw = selected.image.naturalWidth;
+  const ih = selected.image.naturalHeight;
+  const targetAspect = rW / rH; // W/H
+  const cx = cropEditor.rect.x + cropEditor.rect.w / 2;
+  const cy = cropEditor.rect.y + cropEditor.rect.h / 2;
+
+  let w = cropEditor.rect.w;
+  let h = w / targetAspect;
+  if (h > ih) { h = ih; w = h * targetAspect; }
+  if (w > iw) { w = iw; h = w / targetAspect; }
+
+  cropEditor.rect = clampCropRect({ x: cx - w / 2, y: cy - h / 2, w, h }, iw, ih);
+  cropEditor.aspect = targetAspect;
+  renderCropOverlay();
+  // X/Y/W/H% aktualisieren, aber Ratio-Inputs NICHT überschreiben (Nutzer tippt dort gerade)
+  const iwc = Math.max(1, iw);
+  const ihc = Math.max(1, ih);
+  if (cropRectXPercent) cropRectXPercent.value = toPercent(cropEditor.rect.x, iwc).toFixed(2);
+  if (cropRectYPercent) cropRectYPercent.value = toPercent(cropEditor.rect.y, ihc).toFixed(2);
+  if (cropRectWPercent) cropRectWPercent.value = toPercent(cropEditor.rect.w, iwc).toFixed(2);
+  if (cropRectHPercent) cropRectHPercent.value = toPercent(cropEditor.rect.h, ihc).toFixed(2);
+  updateCropOverlayDpiInfo();
+}
+
 function updateCropRectInputs() {
   const selected = getSelectedPlacement();
   if (!selected || !cropEditor.active) return;
@@ -970,6 +1018,7 @@ function updateCropRectInputs() {
   if (cropRectYPercent) cropRectYPercent.value = toPercent(cropEditor.rect.y, ih).toFixed(2);
   if (cropRectWPercent) cropRectWPercent.value = toPercent(cropEditor.rect.w, iw).toFixed(2);
   if (cropRectHPercent) cropRectHPercent.value = toPercent(cropEditor.rect.h, ih).toFixed(2);
+  updateRatioInputsFromRect();
 }
 
 function applyCropRectInputs(changedField) {
@@ -992,6 +1041,7 @@ function applyCropRectInputs(changedField) {
   if (changedField === 'h') h = Math.max(8, h);
 
   cropEditor.rect = clampCropRect({ x, y, w, h }, iw, ih);
+  cropEditor.aspect = cropEditor.rect.w / Math.max(1e-6, cropEditor.rect.h);
   renderCropOverlay();
   updateCropRectInputs();
   updateCropOverlayDpiInfo();
@@ -1099,12 +1149,51 @@ function updateCropOverlayDpiInfo() {
   cropOverlayDpiInfo.textContent = `DPI X: ${Math.round(dpiX)} | DPI Y: ${Math.round(dpiY)} | Min: ${Math.round(minDpi)}`;
 }
 
-function updateCropAspectFromInputs() {
+function getCurrentCropAspect() {
+  if (cropEditor.active && cropEditor.rect.w > 0 && cropEditor.rect.h > 0) {
+    return cropEditor.rect.w / Math.max(1e-6, cropEditor.rect.h);
+  }
+  const selected = getSelectedPlacement();
+  if (selected) {
+    const crop = getCropPixels(selected);
+    return crop.sw / Math.max(1e-6, crop.sh);
+  }
+  return 1;
+}
+
+function updateCropAspectFromInputs(changedAxis = null) {
   if (!cropEditor.active) return;
 
-  // Zielgroesse dient nur der Druckgroesse/DPI-Anzeige und veraendert den Ausschnitt nicht.
+  const aspect = getCurrentCropAspect(); // W/H
+  const widthValue = Number(cropTargetWidthCm?.value || 0);
+  const heightValue = Number(cropTargetHeightCm?.value || 0);
+
+  if (changedAxis === 'width' && widthValue > 0 && cropTargetHeightCm) {
+    cropTargetHeightCm.value = (widthValue / Math.max(1e-6, aspect)).toFixed(1);
+  } else if (changedAxis === 'height' && heightValue > 0 && cropTargetWidthCm) {
+    cropTargetWidthCm.value = (heightValue * aspect).toFixed(1);
+  } else if (changedAxis === null) {
+    if (widthValue > 0 && (!heightValue || heightValue <= 0) && cropTargetHeightCm) {
+      cropTargetHeightCm.value = (widthValue / Math.max(1e-6, aspect)).toFixed(1);
+    } else if (heightValue > 0 && (!widthValue || widthValue <= 0) && cropTargetWidthCm) {
+      cropTargetWidthCm.value = (heightValue * aspect).toFixed(1);
+    }
+  }
+
   if (menuScaleWidthCm && cropTargetWidthCm) menuScaleWidthCm.value = cropTargetWidthCm.value;
   if (menuScaleHeightCm && cropTargetHeightCm) menuScaleHeightCm.value = cropTargetHeightCm.value;
+
+  // Wenn Druckgrösse geändert wurde: Ratio-Inputs aus Druckgrösse setzen und Ausschnitt anpassen
+  if (changedAxis !== null) {
+    const newW = Number(cropTargetWidthCm?.value || 0);
+    const newH = Number(cropTargetHeightCm?.value || 0);
+    if (newW > 0 && newH > 0 && cropRatioH && cropRatioW) {
+      const factor = 10 / Math.max(newH, newW);
+      cropRatioH.value = (newH * factor).toFixed(2);
+      cropRatioW.value = (newW * factor).toFixed(2);
+      applyCropRatioFromInputs();
+    }
+  }
 
   updateCropOverlayDpiInfo();
 }
@@ -1136,6 +1225,7 @@ function openCropOverlayForSelected() {
 
   cropOverlay.hidden = false;
   document.body.style.overflow = 'hidden';
+  updateCropAspectFromInputs();
   renderCropOverlay();
   updateCropRectInputs();
   updateCropOverlayDpiInfo();
@@ -2428,6 +2518,8 @@ if (cropOverlayCanvas) {
       cropEditor.rect = clampCropRect({ ...cropEditor.rect, x: nx, y: ny }, iw, ih);
     }
 
+    cropEditor.aspect = cropEditor.rect.w / Math.max(1e-6, cropEditor.rect.h);
+
     renderCropOverlay();
     updateCropRectInputs();
     updateCropOverlayDpiInfo();
@@ -2471,14 +2563,14 @@ if (cropOverlayCanvas) {
 
 if (cropTargetWidthCm) {
   cropTargetWidthCm.addEventListener('input', () => {
-    updateCropAspectFromInputs();
+    updateCropAspectFromInputs('width');
     updateCropRectInputs();
   });
 }
 
 if (cropTargetHeightCm) {
   cropTargetHeightCm.addEventListener('input', () => {
-    updateCropAspectFromInputs();
+    updateCropAspectFromInputs('height');
     updateCropRectInputs();
   });
 }
@@ -2497,6 +2589,14 @@ if (cropRectWPercent) {
 
 if (cropRectHPercent) {
   cropRectHPercent.addEventListener('input', () => applyCropRectInputs('h'));
+}
+
+if (cropRatioH) {
+  cropRatioH.addEventListener('input', () => applyCropRatioFromInputs());
+}
+
+if (cropRatioW) {
+  cropRatioW.addEventListener('input', () => applyCropRatioFromInputs());
 }
 
 if (cropOverlayApplyBtn) {

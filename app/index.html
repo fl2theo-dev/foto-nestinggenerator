@@ -168,34 +168,60 @@
   <div id="cropOverlay" class="crop-overlay" hidden>
     <div class="crop-overlay-backdrop" data-close-crop-overlay="true"></div>
     <div class="crop-overlay-content" role="dialog" aria-modal="true" aria-label="Beschnitt festlegen">
-      <div class="crop-overlay-head">
-        <strong>Beschnittbereich festlegen</strong>
-        <div class="crop-overlay-actions">
-          <button id="cropOverlayCancelBtn" class="secondary">Abbrechen</button>
-          <button id="cropOverlayApplyBtn">Beschnitt uebernehmen</button>
+
+      <!-- Linkes Menü -->
+      <aside class="crop-panel-left">
+        <div class="crop-panel-title">
+          <strong>Beschnitt festlegen</strong>
+          <div class="crop-panel-btns">
+            <button id="cropOverlayCancelBtn" class="secondary">Abbrechen</button>
+            <button id="cropOverlayApplyBtn">Uebernehmen</button>
+          </div>
         </div>
-      </div>
-      <div class="crop-overlay-meta">
-        <div class="crop-overlay-size-grid">
-          <label for="cropTargetWidthCm">Zielbreite (cm)</label>
-          <input id="cropTargetWidthCm" type="number" min="0.1" step="0.1" />
-          <label for="cropTargetHeightCm">Zielhoehe (cm)</label>
-          <input id="cropTargetHeightCm" type="number" min="0.1" step="0.1" />
+
+        <div class="crop-field-group">
+          <div class="crop-field-label">Verhaeltnis H : B</div>
+          <div class="crop-ratio-row">
+            <input id="cropRatioH" type="number" min="0.01" step="0.01" placeholder="H" />
+            <span class="crop-ratio-sep">:</span>
+            <input id="cropRatioW" type="number" min="0.01" step="0.01" placeholder="B" />
+          </div>
+          <p class="crop-field-hint">Eingabe verändert den Ausschnitt. Ziehen aktualisiert die Felder.</p>
         </div>
-        <div class="crop-overlay-rect-grid">
-          <label for="cropRectXPercent">Ausschnitt X (%)</label>
-          <input id="cropRectXPercent" type="number" min="0" max="100" step="0.1" />
-          <label for="cropRectYPercent">Ausschnitt Y (%)</label>
-          <input id="cropRectYPercent" type="number" min="0" max="100" step="0.1" />
-          <label for="cropRectWPercent">Breite (%)</label>
-          <input id="cropRectWPercent" type="number" min="0.1" max="100" step="0.1" />
-          <label for="cropRectHPercent">Hoehe (%)</label>
-          <input id="cropRectHPercent" type="number" min="0.1" max="100" step="0.1" />
+
+        <div class="crop-field-group">
+          <div class="crop-field-label">Druckgrösse</div>
+          <div class="crop-size-rows">
+            <label for="cropTargetWidthCm">Breite (cm)</label>
+            <input id="cropTargetWidthCm" type="number" min="0.1" step="0.1" />
+            <label for="cropTargetHeightCm">Höhe (cm)</label>
+            <input id="cropTargetHeightCm" type="number" min="0.1" step="0.1" />
+          </div>
         </div>
+
+        <div class="crop-field-group">
+          <div class="crop-field-label">Ausschnitt-Position (%)</div>
+          <div class="crop-size-rows">
+            <label for="cropRectXPercent">X</label>
+            <input id="cropRectXPercent" type="number" min="0" max="100" step="0.1" />
+            <label for="cropRectYPercent">Y</label>
+            <input id="cropRectYPercent" type="number" min="0" max="100" step="0.1" />
+            <label for="cropRectWPercent">Breite</label>
+            <input id="cropRectWPercent" type="number" min="0.1" max="100" step="0.1" />
+            <label for="cropRectHPercent">Höhe</label>
+            <input id="cropRectHPercent" type="number" min="0.1" max="100" step="0.1" />
+          </div>
+        </div>
+
         <p id="cropOverlayDpiInfo" class="hint">DPI: -</p>
+        <p class="hint">Ecken ziehen = Grösse ändern · Innen ziehen = verschieben · Rad = Zoom</p>
+      </aside>
+
+      <!-- Rechtes Bild-Panel -->
+      <div class="crop-panel-right">
+        <canvas id="cropOverlayCanvas"></canvas>
       </div>
-      <canvas id="cropOverlayCanvas" width="1200" height="760"></canvas>
-      <p class="hint">Gesamtes Bild bleibt sichtbar. Rechteck ziehen = Position, Mausrad = Ausschnittgroesse.</p>
+
     </div>
   </div>
 
