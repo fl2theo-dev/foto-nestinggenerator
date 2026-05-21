@@ -2,6 +2,15 @@
 
 Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 
+## [0.2.0] - 2026-05-21
+
+### Added
+
+- Erster lauffaehiger App-MVP unter `app/index.html` angelegt.
+- Upload mehrerer Fotos, Rollenbreite/Max-Hoehe und Nesting-Start implementiert.
+- Regmark-Generierung (4 Punkte je Motiv, 5 mm Durchmesser, 3 mm Abstand) in Vorschau und Export integriert.
+- Export von Druck-SVG und Kontur-SVG auf Basis derselben Geometriedaten umgesetzt.
+
 ## [0.1.3] - 2026-05-21
 
 ### Added

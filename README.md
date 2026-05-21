@@ -8,13 +8,15 @@ Projekt fuer automatisches Foto-Nesting auf Rollenmaterial mit Regmarks und dual
 ## Aktueller Stand
 
 - Konzept und UI-Dummy in [docs/index.html](docs/index.html)
+- Erster App-MVP in [app/index.html](app/index.html)
 - Lokale Versionierung via Git
 
 ## Entwicklungsstart
 
 1. Projekt oeffnen.
-2. [docs/index.html](docs/index.html) im Browser starten.
-3. Aenderungen in kleinen Commits versionieren.
+2. [app/index.html](app/index.html) im Browser starten (MVP-App).
+3. Optional: [docs/index.html](docs/index.html) fuer Konzept/Versionierung oeffnen.
+4. Aenderungen in kleinen Commits versionieren.
 
 ## Release-Eintrag automatisieren
 

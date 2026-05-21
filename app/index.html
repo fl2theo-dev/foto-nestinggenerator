@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Foto-Nestinggenerator MVP</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>Foto-Nestinggenerator</h1>
+    <div class="topbar-links">
+      <a href="../docs/index.html">Konzept</a>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel controls">
+      <h2>Job-Setup</h2>
+
+      <label for="photoInput">Fotos laden</label>
+      <input id="photoInput" type="file" accept="image/*" multiple />
+
+      <div class="row">
+        <div>
+          <label for="rollWidth">Rollenbreite</label>
+          <select id="rollWidth">
+            <option value="431.8">17 Zoll (431.8 mm)</option>
+            <option value="609.6" selected>24 Zoll (609.6 mm)</option>
+            <option value="1016">40 Zoll (1016 mm)</option>
+          </select>
+        </div>
+        <div>
+          <label for="maxHeight">Max. Hoehe (mm)</label>
+          <input id="maxHeight" type="number" min="100" value="1200" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="dpi">DPI fuer mm-Berechnung</label>
+          <input id="dpi" type="number" min="72" value="300" />
+        </div>
+        <div>
+          <label for="gap">Abstand Motive (mm)</label>
+          <input id="gap" type="number" min="0" value="6" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="allowRotate">Rotation erlauben</label>
+          <input id="allowRotate" type="checkbox" checked />
+        </div>
+        <div>
+          <label for="padding">Randabstand (mm)</label>
+          <input id="padding" type="number" min="0" value="10" />
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="nestBtn">Nesting starten</button>
+        <button id="clearBtn" class="secondary">Leeren</button>
+      </div>
+
+      <h3>Export</h3>
+      <div class="actions">
+        <button id="exportPrintSvgBtn">Export Druck-SVG</button>
+        <button id="exportContourSvgBtn">Export Kontur-SVG</button>
+      </div>
+
+      <p id="status" class="status">Keine Fotos geladen.</p>
+    </section>
+
+    <section class="panel preview">
+      <h2>Vorschau</h2>
+      <canvas id="previewCanvas" width="1400" height="900"></canvas>
+      <p class="hint">Regmarks: Durchmesser 5 mm, Abstand 3 mm zur Motivkante (MVP-Regel links/rechts).</p>
+    </section>
+
+    <section class="panel list">
+      <h2>Motive</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Pixel</th>
+            <th>mm</th>
+            <th>Platziert</th>
+          </tr>
+        </thead>
+        <tbody id="photoTableBody"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
