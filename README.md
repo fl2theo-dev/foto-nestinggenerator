@@ -19,6 +19,25 @@ Projekt fuer automatisches Foto-Nesting auf Rollenmaterial mit Regmarks und dual
 3. Optional: [docs/index.html](docs/index.html) fuer Konzept/Versionierung oeffnen.
 4. Aenderungen in kleinen Commits versionieren.
 
+## Neue Kernfunktionen
+
+- Mehrseiten-Nesting (automatische Verteilung auf Seite 1..n)
+- Projekt speichern/laden als JSON (inkl. Layout)
+- Hotfolder-Export direkt aus der App (wo Browser-API verfuegbar)
+- Ubuntu-Setup-Skript: `scripts/setup-ubuntu.sh`
+
+## Ubuntu Schnellsetup
+
+```bash
+./scripts/setup-ubuntu.sh
+```
+
+Optional mit Auto-Installation:
+
+```bash
+./scripts/setup-ubuntu.sh --install
+```
+
 ## Hochwertiger Druck (lokal, mit ICC)
 
 1. In der App `Druck-PDF` erzeugen.

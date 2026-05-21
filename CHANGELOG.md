@@ -2,6 +2,19 @@
 
 Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 
+## [0.3.0] - 2026-05-21
+
+### Added
+
+- Mehrseiten-Nesting in der App inklusive Seitennavigation.
+- Projekt speichern/laden als JSON-Datei.
+- Hotfolder-Export (Druck-/Kontur-PDF direkt in ausgewaehltes Verzeichnis, falls Browser-API verfuegbar).
+- Ubuntu-Setup-Skript `scripts/setup-ubuntu.sh`.
+
+### Changed
+
+- App-Layout auf unabhaengig scrollbare drei Bereiche umgestellt (links Steuerung, Mitte Vorschau, rechts Fotoliste).
+
 ## [0.2.3] - 2026-05-21
 
 ### Added

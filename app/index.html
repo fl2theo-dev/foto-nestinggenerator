@@ -63,10 +63,17 @@
         <button id="clearBtn" class="secondary">Leeren</button>
       </div>
 
+      <div class="actions">
+        <button id="saveProjectBtn" class="secondary">Projekt speichern</button>
+        <button id="loadProjectBtn" class="secondary">Projekt laden</button>
+      </div>
+      <input id="projectLoadInput" type="file" accept="application/json" hidden />
+
       <h3>Export</h3>
       <div class="actions">
         <button id="exportPrintPdfBtn">Export Druck-PDF</button>
         <button id="exportContourPdfBtn">Export Kontur-PDF</button>
+        <button id="exportHotfolderBtn" class="secondary">Export in Hotfolder</button>
       </div>
       <p class="hint">High-End Druck: Exportiere Druck-PDF und konvertiere es lokal mit ICC-Profil via scripts/make-pdfx.js.</p>
 
@@ -100,6 +107,11 @@
 
     <section class="panel preview">
       <h2>Vorschau</h2>
+      <div class="actions page-nav">
+        <button id="prevPageBtn" class="secondary">Seite zurueck</button>
+        <span id="pageIndicator">Seite 0 / 0</span>
+        <button id="nextPageBtn" class="secondary">Seite weiter</button>
+      </div>
       <canvas id="previewCanvas" width="1400" height="900"></canvas>
       <p class="hint">Regmarks: Durchmesser 5 mm, Abstand 3 mm zur Motivkante (MVP-Regel links/rechts).</p>
     </section>

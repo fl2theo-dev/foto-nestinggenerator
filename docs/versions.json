@@ -1,6 +1,16 @@
 {
   "releases": [
     {
+      "version": "0.3.0",
+      "date": "2026-05-21",
+      "summary": "Mehrseiten-Workflow, Projektdateien und Hotfolder-Export umgesetzt.",
+      "changes": [
+        "Mehrseiten-Nesting mit Seitensteuerung in der Vorschau integriert.",
+        "Projekt speichern/laden als JSON inklusive Layoutstatus umgesetzt.",
+        "Hotfolder-Export fuer Druck-/Kontur-PDF via Directory Picker sowie unabhaengig scrollbare Dreispalten-UI ergaenzt."
+      ]
+    },
+    {
       "version": "0.2.3",
       "date": "2026-05-21",
       "summary": "Lokaler High-Quality-PDF-Workflow mit ICC-Postprozess ergaenzt.",
