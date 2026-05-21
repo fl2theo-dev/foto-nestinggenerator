@@ -28,6 +28,8 @@ function getSheetRegmarks(page, config, pageHeightMm = config.maxHeight) {
   ];
 }
 const MM_PER_INCH = 25.4;
+const MM_PER_POINT = MM_PER_INCH / 72;
+const MM_PER_CM = 10;
 const REGMARK_DIAMETER_MM = 5;
 const REGMARK_RADIUS_MM = REGMARK_DIAMETER_MM / 2;
 const REGMARK_OFFSET_MM = 3 + REGMARK_RADIUS_MM;
@@ -60,11 +62,56 @@ const prevPageBtn = document.getElementById('prevPageBtn');
 const nextPageBtn = document.getElementById('nextPageBtn');
 const pageIndicator = document.getElementById('pageIndicator');
 const effectiveHeightInfo = document.getElementById('effectiveHeightInfo');
+const manualNestingMenu = document.getElementById('manualNestingMenu');
+const menuRotateBtn = document.getElementById('menuRotateBtn');
+const menuUnplaceBtn = document.getElementById('menuUnplaceBtn');
+const menuUpBtn = document.getElementById('menuUpBtn');
+const menuLeftBtn = document.getElementById('menuLeftBtn');
+const menuRightBtn = document.getElementById('menuRightBtn');
+const menuDownBtn = document.getElementById('menuDownBtn');
+const menuShowImageBtn = document.getElementById('menuShowImageBtn');
+const menuCropBtn = document.getElementById('menuCropBtn');
+const menuCurrentSizeValue = document.getElementById('menuCurrentSizeValue');
+const menuScaleWidthCm = document.getElementById('menuScaleWidthCm');
+const menuScaleHeightCm = document.getElementById('menuScaleHeightCm');
+const menuScaleDpi = document.getElementById('menuScaleDpi');
+const menuApplyScaleBtn = document.getElementById('menuApplyScaleBtn');
+const photoOverlay = document.getElementById('photoOverlay');
+const photoOverlayViewport = document.getElementById('photoOverlayViewport');
+const photoOverlayImage = document.getElementById('photoOverlayImage');
+const photoOverlayCaption = document.getElementById('photoOverlayCaption');
+const photoOverlayCloseBtn = document.getElementById('photoOverlayCloseBtn');
+const cropOverlay = document.getElementById('cropOverlay');
+const cropOverlayCanvas = document.getElementById('cropOverlayCanvas');
+const cropOverlayApplyBtn = document.getElementById('cropOverlayApplyBtn');
+const cropOverlayCancelBtn = document.getElementById('cropOverlayCancelBtn');
+const cropTargetWidthCm = document.getElementById('cropTargetWidthCm');
+const cropTargetHeightCm = document.getElementById('cropTargetHeightCm');
+const cropOverlayDpiInfo = document.getElementById('cropOverlayDpiInfo');
+const cropRectXPercent = document.getElementById('cropRectXPercent');
+const cropRectYPercent = document.getElementById('cropRectYPercent');
+const cropRectWPercent = document.getElementById('cropRectWPercent');
+const cropRectHPercent = document.getElementById('cropRectHPercent');
+
+const overlayView = {
+  scale: 1,
+  tx: 0,
+  ty: 0,
+  dragging: false,
+  pointerId: null,
+  startX: 0,
+  startY: 0,
+  startTx: 0,
+  startTy: 0
+};
 
 const statusEl = document.getElementById('status');
 const tableBody = document.getElementById('photoTableBody');
 const previewCanvas = document.getElementById('previewCanvas');
 const ctx = previewCanvas.getContext('2d');
+
+const PHOTO_CARD_ROW_HEIGHT = 86;
+const PHOTO_CARD_OVERSCAN = 6;
 
 const state = {
   photos: [],
@@ -75,8 +122,33 @@ const state = {
     active: false,
     id: null,
     offsetXmm: 0,
-    offsetYmm: 0
+    offsetYmm: 0,
+    moved: false,
+    startClientX: 0,
+    startClientY: 0
   }
+};
+
+let suppressCanvasClick = false;
+let virtualListInitialized = false;
+let manualScaleLastEdited = 'width';
+
+const virtualPhotoList = {
+  items: []
+};
+
+const cropEditor = {
+  active: false,
+  aspect: 1,
+  rect: { x: 0, y: 0, w: 0, h: 0 },
+  display: { x: 0, y: 0, w: 0, h: 0 },
+  dragging: false,
+  dragMode: null,
+  activeHandle: null,
+  pointerId: null,
+  resizeAnchor: null,
+  dragOffsetX: 0,
+  dragOffsetY: 0
 };
 
 function setStatus(message) {
@@ -433,6 +505,545 @@ function getPlacementMap() {
   return map;
 }
 
+function getPhotoById(id) {
+  return state.photos.find((photo) => photo.id === id) || null;
+}
+
+function getCropNorm(item) {
+  return item.cropNorm || { x: 0, y: 0, w: 1, h: 1 };
+}
+
+function getCropPixels(item) {
+  const cn = getCropNorm(item);
+  const iw = Math.max(1, item.image.naturalWidth);
+  const ih = Math.max(1, item.image.naturalHeight);
+  const sx = Math.max(0, Math.min(iw - 1, cn.x * iw));
+  const sy = Math.max(0, Math.min(ih - 1, cn.y * ih));
+  const sw = Math.max(1, Math.min(iw - sx, cn.w * iw));
+  const sh = Math.max(1, Math.min(ih - sy, cn.h * ih));
+  return { sx, sy, sw, sh, iw, ih };
+}
+
+function getPlacementPixelDims(item) {
+  const crop = getCropPixels(item);
+  return {
+    pxWidth: item.rotated ? crop.sh : crop.sw,
+    pxHeight: item.rotated ? crop.sw : crop.sh
+  };
+}
+
+function updateManualScaleControlsForSelected() {
+  const selected = getSelectedPlacement();
+  if (!selected) {
+    if (menuCurrentSizeValue) menuCurrentSizeValue.textContent = '-';
+    if (menuScaleWidthCm) menuScaleWidthCm.value = '';
+    if (menuScaleHeightCm) menuScaleHeightCm.value = '';
+    if (menuScaleDpi) menuScaleDpi.value = '';
+    return;
+  }
+
+  if (menuCurrentSizeValue) {
+    menuCurrentSizeValue.textContent = `${(selected.widthMm / MM_PER_CM).toFixed(1)} x ${(selected.heightMm / MM_PER_CM).toFixed(1)} cm`;
+  }
+  if (menuScaleWidthCm) menuScaleWidthCm.value = (selected.widthMm / MM_PER_CM).toFixed(1);
+  if (menuScaleHeightCm) menuScaleHeightCm.value = (selected.heightMm / MM_PER_CM).toFixed(1);
+
+  const dims = getPlacementPixelDims(selected);
+  const dpiX = dims.pxWidth / (selected.widthMm / MM_PER_INCH);
+  const dpiY = dims.pxHeight / (selected.heightMm / MM_PER_INCH);
+  const avgDpi = (dpiX + dpiY) / 2;
+  if (menuScaleDpi) menuScaleDpi.value = Number.isFinite(avgDpi) ? String(Math.round(avgDpi)) : '';
+}
+
+function syncScaleInputsByRatio(changedAxis) {
+  const selected = getSelectedPlacement();
+  if (!selected) return;
+  const ratio = selected.widthMm / Math.max(1e-6, selected.heightMm);
+
+  const w = Number(menuScaleWidthCm?.value || 0);
+  const h = Number(menuScaleHeightCm?.value || 0);
+
+  if (changedAxis === 'width' && w > 0 && menuScaleHeightCm) {
+    menuScaleHeightCm.value = (w / ratio).toFixed(1);
+  }
+  if (changedAxis === 'height' && h > 0 && menuScaleWidthCm) {
+    menuScaleWidthCm.value = (h * ratio).toFixed(1);
+  }
+}
+
+function applyScaleToSelected() {
+  const selected = getSelectedPlacement();
+  if (!selected) {
+    setStatus('Bitte zuerst ein Motiv in der Vorschau auswaehlen.');
+    return;
+  }
+
+  const page = getCurrentPagePlacements();
+  const config = getConfig();
+
+  const targetWidthCm = Number(menuScaleWidthCm?.value || 0);
+  const targetHeightCm = Number(menuScaleHeightCm?.value || 0);
+  const targetDpi = Number(menuScaleDpi?.value || 0);
+
+  let targetWidthMm = targetWidthCm > 0 ? targetWidthCm * MM_PER_CM : null;
+  let targetHeightMm = targetHeightCm > 0 ? targetHeightCm * MM_PER_CM : null;
+
+  const pxDims = getPlacementPixelDims(selected);
+  if ((!targetWidthMm || !targetHeightMm) && targetDpi > 0) {
+    const dpiWidthMm = (pxDims.pxWidth / targetDpi) * MM_PER_INCH;
+    const dpiHeightMm = (pxDims.pxHeight / targetDpi) * MM_PER_INCH;
+    if (!targetWidthMm) targetWidthMm = dpiWidthMm;
+    if (!targetHeightMm) targetHeightMm = dpiHeightMm;
+  }
+
+  const ratio = selected.widthMm / Math.max(1e-6, selected.heightMm);
+  if (targetWidthMm && !targetHeightMm) {
+    targetHeightMm = targetWidthMm / ratio;
+  }
+  if (targetHeightMm && !targetWidthMm) {
+    targetWidthMm = targetHeightMm * ratio;
+  }
+  if (targetWidthMm && targetHeightMm) {
+    if (manualScaleLastEdited === 'height') {
+      targetWidthMm = targetHeightMm * ratio;
+    } else {
+      targetHeightMm = targetWidthMm / ratio;
+    }
+  }
+
+  if (!targetWidthMm || !targetHeightMm || targetWidthMm <= 0 || targetHeightMm <= 0) {
+    setStatus('Bitte Zielgroesse oder DPI gueltig eingeben.');
+    return;
+  }
+
+  const centerX = selected.xMm + selected.widthMm / 2;
+  const centerY = selected.yMm + selected.heightMm / 2;
+  const candidate = {
+    ...selected,
+    xMm: centerX - targetWidthMm / 2,
+    yMm: centerY - targetHeightMm / 2,
+    widthMm: targetWidthMm,
+    heightMm: targetHeightMm
+  };
+
+  const snapped = findNearestFreePlacement(candidate, page, config, selected.id, {
+    maxRadiusMm: Math.max(targetWidthMm, targetHeightMm) + 180,
+    angleSamples: 24,
+    stepMm: Math.max(1, Number(moveStepInput.value || 0) || 2)
+  });
+
+  if (!snapped) {
+    setStatus('Skalierung nicht moeglich (keine freie Position gefunden).');
+    return;
+  }
+
+  selected.xMm = snapped.xMm;
+  selected.yMm = snapped.yMm;
+  selected.widthMm = snapped.widthMm;
+  selected.heightMm = snapped.heightMm;
+
+  updateManualScaleControlsForSelected();
+  drawPreview();
+  setStatus(`${selected.name} skaliert auf ${(selected.widthMm / MM_PER_CM).toFixed(1)} x ${(selected.heightMm / MM_PER_CM).toFixed(1)} cm.`);
+}
+
+function fitRectToAspect(rect, aspect) {
+  const cx = rect.x + rect.w / 2;
+  const cy = rect.y + rect.h / 2;
+  let w = rect.w;
+  let h = rect.h;
+  if (w / h > aspect) {
+    w = h * aspect;
+  } else {
+    h = w / aspect;
+  }
+  return { x: cx - w / 2, y: cy - h / 2, w, h };
+}
+
+function clampCropRect(rect, iw, ih) {
+  const r = { ...rect };
+  r.w = Math.min(Math.max(8, r.w), iw);
+  r.h = Math.min(Math.max(8, r.h), ih);
+  r.x = Math.min(Math.max(0, r.x), iw - r.w);
+  r.y = Math.min(Math.max(0, r.y), ih - r.h);
+  return r;
+}
+
+function toPercent(value, total) {
+  return (value / Math.max(1e-6, total)) * 100;
+}
+
+function fromPercent(value, total) {
+  return (value / 100) * total;
+}
+
+function getCropRectCanvas(selected) {
+  const d = cropEditor.display;
+  const iw = selected.image.naturalWidth;
+  const ih = selected.image.naturalHeight;
+  return {
+    x: d.x + (cropEditor.rect.x / iw) * d.w,
+    y: d.y + (cropEditor.rect.y / ih) * d.h,
+    w: (cropEditor.rect.w / iw) * d.w,
+    h: (cropEditor.rect.h / ih) * d.h
+  };
+}
+
+function canvasToImagePoint(selected, x, y) {
+  const d = cropEditor.display;
+  const iw = selected.image.naturalWidth;
+  const ih = selected.image.naturalHeight;
+  const px = ((x - d.x) / Math.max(1e-6, d.w)) * iw;
+  const py = ((y - d.y) / Math.max(1e-6, d.h)) * ih;
+  return {
+    x: Math.min(Math.max(0, px), iw),
+    y: Math.min(Math.max(0, py), ih)
+  };
+}
+
+function getHandlePoints(rect) {
+  return {
+    nw: { x: rect.x, y: rect.y },
+    ne: { x: rect.x + rect.w, y: rect.y },
+    se: { x: rect.x + rect.w, y: rect.y + rect.h },
+    sw: { x: rect.x, y: rect.y + rect.h }
+  };
+}
+
+function getHandleAtCanvasPoint(selected, x, y, threshold = 12) {
+  const rect = getCropRectCanvas(selected);
+  const handles = getHandlePoints(rect);
+  let best = null;
+  let bestDist = Infinity;
+
+  for (const [key, pt] of Object.entries(handles)) {
+    const dist = Math.hypot(x - pt.x, y - pt.y);
+    if (dist <= threshold && dist < bestDist) {
+      best = key;
+      bestDist = dist;
+    }
+  }
+  return best;
+}
+
+function getResizeAnchorForHandle(handle, rect) {
+  if (handle === 'nw') return { x: rect.x + rect.w, y: rect.y + rect.h };
+  if (handle === 'ne') return { x: rect.x, y: rect.y + rect.h };
+  if (handle === 'se') return { x: rect.x, y: rect.y };
+  if (handle === 'sw') return { x: rect.x + rect.w, y: rect.y };
+  return null;
+}
+
+function buildRectFromHandleDrag(handle, anchor, pointer, aspect, iw, ih) {
+  const minW = 8;
+  const maxWFromBounds = handle === 'nw' || handle === 'sw'
+    ? anchor.x
+    : iw - anchor.x;
+  const maxHFromBounds = handle === 'nw' || handle === 'ne'
+    ? anchor.y
+    : ih - anchor.y;
+
+  const rawW = Math.abs(pointer.x - anchor.x);
+  const rawH = Math.abs(pointer.y - anchor.y);
+
+  let w = Math.min(rawW, rawH * aspect);
+  let h = w / Math.max(1e-6, aspect);
+
+  w = Math.min(w, maxWFromBounds, maxHFromBounds * aspect);
+  h = w / Math.max(1e-6, aspect);
+
+  w = Math.max(minW, w);
+  h = Math.max(minW / Math.max(1e-6, aspect), h);
+
+  let x = anchor.x;
+  let y = anchor.y;
+
+  if (handle === 'nw') {
+    x = anchor.x - w;
+    y = anchor.y - h;
+  } else if (handle === 'ne') {
+    x = anchor.x;
+    y = anchor.y - h;
+  } else if (handle === 'se') {
+    x = anchor.x;
+    y = anchor.y;
+  } else if (handle === 'sw') {
+    x = anchor.x - w;
+    y = anchor.y;
+  }
+
+  return clampCropRect({ x, y, w, h }, iw, ih);
+}
+
+function updateCropRectInputs() {
+  const selected = getSelectedPlacement();
+  if (!selected || !cropEditor.active) return;
+  const iw = Math.max(1, selected.image.naturalWidth);
+  const ih = Math.max(1, selected.image.naturalHeight);
+
+  if (cropRectXPercent) cropRectXPercent.value = toPercent(cropEditor.rect.x, iw).toFixed(2);
+  if (cropRectYPercent) cropRectYPercent.value = toPercent(cropEditor.rect.y, ih).toFixed(2);
+  if (cropRectWPercent) cropRectWPercent.value = toPercent(cropEditor.rect.w, iw).toFixed(2);
+  if (cropRectHPercent) cropRectHPercent.value = toPercent(cropEditor.rect.h, ih).toFixed(2);
+}
+
+function applyCropRectInputs(changedField) {
+  if (!cropEditor.active) return;
+  const selected = getSelectedPlacement();
+  if (!selected) return;
+
+  const iw = Math.max(1, selected.image.naturalWidth);
+  const ih = Math.max(1, selected.image.naturalHeight);
+  const current = cropEditor.rect;
+
+  let x = fromPercent(Number(cropRectXPercent?.value || toPercent(current.x, iw)), iw);
+  let y = fromPercent(Number(cropRectYPercent?.value || toPercent(current.y, ih)), ih);
+  let w = fromPercent(Number(cropRectWPercent?.value || toPercent(current.w, iw)), iw);
+  let h = fromPercent(Number(cropRectHPercent?.value || toPercent(current.h, ih)), ih);
+
+  if (changedField === 'w') {
+    h = w / Math.max(1e-6, cropEditor.aspect);
+  } else if (changedField === 'h') {
+    w = h * cropEditor.aspect;
+  } else {
+    h = w / Math.max(1e-6, cropEditor.aspect);
+  }
+
+  cropEditor.rect = clampCropRect({ x, y, w, h }, iw, ih);
+  renderCropOverlay();
+  updateCropRectInputs();
+  updateCropOverlayDpiInfo();
+}
+
+function applyOverlayTransform() {
+  if (!photoOverlayImage) return;
+  photoOverlayImage.style.transform = `translate(${overlayView.tx}px, ${overlayView.ty}px) scale(${overlayView.scale})`;
+}
+
+function resetOverlayView() {
+  overlayView.scale = 1;
+  overlayView.tx = 0;
+  overlayView.ty = 0;
+  overlayView.dragging = false;
+  overlayView.pointerId = null;
+  if (photoOverlayViewport) {
+    photoOverlayViewport.classList.remove('is-dragging');
+  }
+  applyOverlayTransform();
+}
+
+function renderCropOverlay() {
+  if (!cropOverlayCanvas || !cropEditor.active) return;
+  const selected = getSelectedPlacement();
+  if (!selected) return;
+
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const cw = Math.max(1, Math.floor(cropOverlayCanvas.clientWidth));
+  const ch = Math.max(1, Math.floor(cropOverlayCanvas.clientHeight));
+  cropOverlayCanvas.width = Math.floor(cw * dpr);
+  cropOverlayCanvas.height = Math.floor(ch * dpr);
+  const c = cropOverlayCanvas.getContext('2d');
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const iw = selected.image.naturalWidth;
+  const ih = selected.image.naturalHeight;
+  const scale = Math.min(cw / iw, ch / ih);
+  const dw = iw * scale;
+  const dh = ih * scale;
+  const dx = (cw - dw) / 2;
+  const dy = (ch - dh) / 2;
+  cropEditor.display = { x: dx, y: dy, w: dw, h: dh };
+
+  c.clearRect(0, 0, cw, ch);
+  c.drawImage(selected.image, dx, dy, dw, dh);
+
+  c.fillStyle = 'rgba(0,0,0,0.45)';
+  c.fillRect(0, 0, cw, ch);
+
+  const rx = dx + (cropEditor.rect.x / iw) * dw;
+  const ry = dy + (cropEditor.rect.y / ih) * dh;
+  const rw = (cropEditor.rect.w / iw) * dw;
+  const rh = (cropEditor.rect.h / ih) * dh;
+
+  c.drawImage(selected.image, cropEditor.rect.x, cropEditor.rect.y, cropEditor.rect.w, cropEditor.rect.h, rx, ry, rw, rh);
+  c.strokeStyle = '#77ff9d';
+  c.lineWidth = 2;
+  c.strokeRect(rx, ry, rw, rh);
+
+  const handles = getHandlePoints({ x: rx, y: ry, w: rw, h: rh });
+  c.fillStyle = '#f5fff8';
+  c.strokeStyle = '#0d2118';
+  c.lineWidth = 1.5;
+  for (const pt of Object.values(handles)) {
+    c.beginPath();
+    c.arc(pt.x, pt.y, 6, 0, Math.PI * 2);
+    c.fill();
+    c.stroke();
+  }
+}
+
+function getCropTargetSizeMm() {
+  const wCm = Number(cropTargetWidthCm?.value || 0);
+  const hCm = Number(cropTargetHeightCm?.value || 0);
+  if (wCm <= 0 || hCm <= 0) return null;
+  return { widthMm: wCm * MM_PER_CM, heightMm: hCm * MM_PER_CM };
+}
+
+function getCropPlacementPixelDims(item, rect) {
+  if (item.rotated) {
+    return { pxWidth: rect.h, pxHeight: rect.w };
+  }
+  return { pxWidth: rect.w, pxHeight: rect.h };
+}
+
+function updateCropOverlayDpiInfo() {
+  if (!cropOverlayDpiInfo) return;
+  const selected = getSelectedPlacement();
+  if (!selected || !cropEditor.active) {
+    cropOverlayDpiInfo.textContent = 'DPI: -';
+    return;
+  }
+
+  const target = getCropTargetSizeMm();
+  if (!target) {
+    cropOverlayDpiInfo.textContent = 'DPI: Bitte Zielbreite und Zielhoehe eingeben.';
+    return;
+  }
+
+  const px = getCropPlacementPixelDims(selected, cropEditor.rect);
+  const dpiX = px.pxWidth / (target.widthMm / MM_PER_INCH);
+  const dpiY = px.pxHeight / (target.heightMm / MM_PER_INCH);
+  const minDpi = Math.min(dpiX, dpiY);
+  cropOverlayDpiInfo.textContent = `DPI X: ${Math.round(dpiX)} | DPI Y: ${Math.round(dpiY)} | Min: ${Math.round(minDpi)}`;
+}
+
+function updateCropAspectFromInputs() {
+  if (!cropEditor.active) return;
+  const selected = getSelectedPlacement();
+  if (!selected) return;
+  const target = getCropTargetSizeMm();
+  if (!target) {
+    updateCropOverlayDpiInfo();
+    return;
+  }
+
+  const aspect = target.widthMm / Math.max(1e-6, target.heightMm);
+  cropEditor.aspect = aspect;
+  cropEditor.rect = clampCropRect(
+    fitRectToAspect(cropEditor.rect, aspect),
+    selected.image.naturalWidth,
+    selected.image.naturalHeight
+  );
+  renderCropOverlay();
+  updateCropOverlayDpiInfo();
+}
+
+function openCropOverlayForSelected() {
+  const selected = getSelectedPlacement();
+  if (!selected || !cropOverlay) {
+    setStatus('Bitte zuerst ein Motiv in der Vorschau auswaehlen.');
+    return;
+  }
+
+  const tw = Number(menuScaleWidthCm?.value || 0) || (selected.widthMm / MM_PER_CM);
+  const th = Number(menuScaleHeightCm?.value || 0) || (selected.heightMm / MM_PER_CM);
+  const targetAspect = tw > 0 && th > 0 ? tw / th : (selected.widthMm / Math.max(1e-6, selected.heightMm));
+
+  if (cropTargetWidthCm) cropTargetWidthCm.value = tw.toFixed(1);
+  if (cropTargetHeightCm) cropTargetHeightCm.value = th.toFixed(1);
+
+  const cropPx = getCropPixels(selected);
+  let rect = fitRectToAspect({ x: cropPx.sx, y: cropPx.sy, w: cropPx.sw, h: cropPx.sh }, targetAspect);
+  rect = clampCropRect(rect, cropPx.iw, cropPx.ih);
+
+  cropEditor.active = true;
+  cropEditor.aspect = targetAspect;
+  cropEditor.rect = rect;
+  cropEditor.dragging = false;
+  cropEditor.dragMode = null;
+  cropEditor.activeHandle = null;
+  cropEditor.pointerId = null;
+  cropEditor.resizeAnchor = null;
+
+  cropOverlay.hidden = false;
+  document.body.style.overflow = 'hidden';
+  renderCropOverlay();
+  updateCropRectInputs();
+  updateCropOverlayDpiInfo();
+}
+
+function closeCropOverlay() {
+  cropEditor.active = false;
+  cropEditor.dragging = false;
+  cropEditor.dragMode = null;
+  cropEditor.activeHandle = null;
+  cropEditor.pointerId = null;
+  cropEditor.resizeAnchor = null;
+  if (cropOverlay) cropOverlay.hidden = true;
+  if (photoOverlay && !photoOverlay.hidden) {
+    document.body.style.overflow = 'hidden';
+  } else {
+    document.body.style.overflow = '';
+  }
+}
+
+function applyCropOverlay() {
+  const selected = getSelectedPlacement();
+  if (!selected || !cropEditor.active) {
+    closeCropOverlay();
+    return;
+  }
+
+  const target = getCropTargetSizeMm();
+  if (!target) {
+    setStatus('Bitte Zielbreite und Zielhoehe fuer den Beschnitt eingeben.');
+    return;
+  }
+
+  const iw = selected.image.naturalWidth;
+  const ih = selected.image.naturalHeight;
+  const r = clampCropRect(cropEditor.rect, iw, ih);
+  selected.cropNorm = {
+    x: r.x / iw,
+    y: r.y / ih,
+    w: r.w / iw,
+    h: r.h / ih
+  };
+
+  const page = getCurrentPagePlacements();
+  const config = getConfig();
+  const centerX = selected.xMm + selected.widthMm / 2;
+  const centerY = selected.yMm + selected.heightMm / 2;
+  const candidate = {
+    ...selected,
+    xMm: centerX - target.widthMm / 2,
+    yMm: centerY - target.heightMm / 2,
+    widthMm: target.widthMm,
+    heightMm: target.heightMm
+  };
+  const snapped = findNearestFreePlacement(candidate, page, config, selected.id, {
+    maxRadiusMm: Math.max(candidate.widthMm, candidate.heightMm) + 180,
+    angleSamples: 24
+  });
+  if (!snapped) {
+    setStatus('Beschnitt gesetzt, aber Zielgroesse passt nicht kollisionsfrei in den Bogen.');
+    return;
+  }
+
+  selected.xMm = snapped.xMm;
+  selected.yMm = snapped.yMm;
+  selected.widthMm = snapped.widthMm;
+  selected.heightMm = snapped.heightMm;
+
+  if (menuScaleWidthCm) menuScaleWidthCm.value = (target.widthMm / MM_PER_CM).toFixed(1);
+  if (menuScaleHeightCm) menuScaleHeightCm.value = (target.heightMm / MM_PER_CM).toFixed(1);
+
+  closeCropOverlay();
+  updateManualScaleControlsForSelected();
+  drawPreview();
+  setStatus('Beschnitt uebernommen.');
+}
+
 function canPlaceCandidate(candidate, pagePlacements, config, ignoreId = null) {
   const fp = getFootprintRect(candidate);
 
@@ -447,6 +1058,49 @@ function canPlaceCandidate(candidate, pagePlacements, config, ignoreId = null) {
   }
 
   return true;
+}
+
+function clampCandidateToBounds(candidate, config) {
+  const minX = config.padding;
+  const maxX = config.rollWidth - config.padding - candidate.widthMm;
+  const minY = config.padding;
+  const maxY = config.maxHeight - config.padding - candidate.heightMm;
+
+  return {
+    ...candidate,
+    xMm: Math.min(Math.max(candidate.xMm, minX), maxX),
+    yMm: Math.min(Math.max(candidate.yMm, minY), maxY)
+  };
+}
+
+function findNearestFreePlacement(candidate, pagePlacements, config, ignoreId = null, options = {}) {
+  const stepMm = Math.max(1, Number(options.stepMm) || Number(moveStepInput.value) || 2);
+  const maxRadiusMm = Math.max(stepMm, Number(options.maxRadiusMm) || 120);
+  const angleSamples = Math.max(8, Number(options.angleSamples) || 16);
+
+  const base = clampCandidateToBounds(candidate, config);
+  if (canPlaceCandidate(base, pagePlacements, config, ignoreId)) {
+    return base;
+  }
+
+  for (let radius = stepMm; radius <= maxRadiusMm + 1e-6; radius += stepMm) {
+    for (let i = 0; i < angleSamples; i++) {
+      const angle = (Math.PI * 2 * i) / angleSamples;
+      const test = clampCandidateToBounds(
+        {
+          ...candidate,
+          xMm: base.xMm + Math.cos(angle) * radius,
+          yMm: base.yMm + Math.sin(angle) * radius
+        },
+        config
+      );
+      if (canPlaceCandidate(test, pagePlacements, config, ignoreId)) {
+        return test;
+      }
+    }
+  }
+
+  return null;
 }
 
 function updatePageIndicator() {
@@ -464,6 +1118,77 @@ function updatePageIndicator() {
   const page = getCurrentPagePlacements();
   const effectiveHeight = getEffectivePageHeightMm(page, config);
   effectiveHeightInfo.textContent = `Effektive Seitenhoehe: ${effectiveHeight.toFixed(1)} mm (Max: ${config.maxHeight.toFixed(1)} mm)`;
+}
+
+function updatePhotoCardSelection() {
+  const cards = tableBody.querySelectorAll('.photo-card');
+  cards.forEach((card) => {
+    if (!(card instanceof HTMLElement)) return;
+    const id = card.dataset.photoId || '';
+    card.classList.toggle('is-selected', id === state.selectedId);
+  });
+}
+
+function createPhotoCardElement(item, index) {
+  const card = document.createElement('div');
+  card.className = `photo-card${item.id === state.selectedId ? ' is-selected' : ''}`;
+  card.dataset.photoId = item.id;
+  card.style.position = 'absolute';
+  card.style.left = '0';
+  card.style.right = '0';
+  card.style.top = `${index * PHOTO_CARD_ROW_HEIGHT}px`;
+
+  card.innerHTML = `
+    <img class="photo-card-thumb" src="${item.thumbSrc}" alt="Vorschau ${item.name}" loading="lazy" decoding="async" />
+    <div class="photo-card-lines">
+      <div class="photo-line-1">${item.name}</div>
+      <div class="photo-line-2">${item.pixelWidth}x${item.pixelHeight} px | ${item.widthCm.toFixed(1)} x ${item.heightCm.toFixed(1)} cm</div>
+      <div class="photo-line-3">Auf Seite ${item.onPage || '-'}</div>
+    </div>
+  `;
+
+  card.addEventListener('click', () => {
+    selectPlacementById(item.id);
+    openPhotoOverlay(item);
+  });
+
+  return card;
+}
+
+function renderVirtualizedPhotoCards() {
+  if (!tableBody) return;
+
+  const items = virtualPhotoList.items;
+  const total = items.length;
+  const viewportHeight = tableBody.clientHeight || 0;
+  const scrollTop = tableBody.scrollTop || 0;
+
+  const start = Math.max(0, Math.floor(scrollTop / PHOTO_CARD_ROW_HEIGHT) - PHOTO_CARD_OVERSCAN);
+  const visibleCount = Math.ceil((viewportHeight || 1) / PHOTO_CARD_ROW_HEIGHT) + PHOTO_CARD_OVERSCAN * 2;
+  const end = Math.min(total, start + Math.max(1, visibleCount));
+
+  tableBody.innerHTML = '';
+  const spacer = document.createElement('div');
+  spacer.className = 'photo-card-spacer';
+  spacer.style.height = `${total * PHOTO_CARD_ROW_HEIGHT}px`;
+  tableBody.appendChild(spacer);
+
+  const fragment = document.createDocumentFragment();
+  for (let i = start; i < end; i++) {
+    fragment.appendChild(createPhotoCardElement(items[i], i));
+  }
+  spacer.appendChild(fragment);
+}
+
+function ensureVirtualizedListInitialized() {
+  if (virtualListInitialized || !tableBody) return;
+  tableBody.addEventListener('scroll', () => {
+    renderVirtualizedPhotoCards();
+  });
+  window.addEventListener('resize', () => {
+    renderVirtualizedPhotoCards();
+  });
+  virtualListInitialized = true;
 }
 
 function drawPreview() {
@@ -500,14 +1225,15 @@ function drawPreview() {
     const h = item.heightMm * scale;
 
     if (item.image) {
+      const crop = getCropPixels(item);
       if (item.rotated) {
         ctx.save();
         ctx.translate(x, y + h);
         ctx.rotate(-Math.PI / 2);
-        ctx.drawImage(item.image, 0, 0, h, w);
+        ctx.drawImage(item.image, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, h, w);
         ctx.restore();
       } else {
-        ctx.drawImage(item.image, x, y, w, h);
+        ctx.drawImage(item.image, crop.sx, crop.sy, crop.sw, crop.sh, x, y, w, h);
       }
     } else {
       ctx.fillStyle = '#9fd0c4';
@@ -551,20 +1277,53 @@ function drawPreview() {
 }
 
 function renderTable() {
-  tableBody.innerHTML = '';
+  ensureVirtualizedListInitialized();
   const placementMap = getPlacementMap();
 
-  state.photos.forEach((photo) => {
-    const tr = document.createElement('tr');
-    const onPage = placementMap.get(photo.id);
-    tr.innerHTML = `
-      <td>${photo.name}</td>
-      <td>${photo.pixelWidth} x ${photo.pixelHeight}</td>
-      <td>${photo.originalWidthMm.toFixed(1)} x ${photo.originalHeightMm.toFixed(1)}</td>
-      <td>${onPage ? `Seite ${onPage}` : 'Nein'}</td>
-    `;
-    tableBody.appendChild(tr);
-  });
+  virtualPhotoList.items = state.photos.map((photo) => ({
+    ...photo,
+    onPage: placementMap.get(photo.id) || null,
+    widthCm: photo.originalWidthMm / 10,
+    heightCm: photo.originalHeightMm / 10,
+    thumbSrc: photo.thumbnailDataUrl || photo.dataUrl
+  }));
+
+  renderVirtualizedPhotoCards();
+}
+
+function openPhotoOverlay(photo) {
+  if (!photoOverlay || !photoOverlayImage || !photo) return;
+  photoOverlayImage.src = photo.dataUrl || '';
+  photoOverlayImage.draggable = false;
+  resetOverlayView();
+  if (photoOverlayCaption) {
+    photoOverlayCaption.textContent = `${photo.name} - ${photo.pixelWidth} x ${photo.pixelHeight}px - Mausrad: Zoom, Ziehen: Verschieben`;
+  }
+  photoOverlay.hidden = false;
+  document.body.style.overflow = 'hidden';
+}
+
+function buildThumbnailDataUrl(image, maxSide = 96) {
+  const srcW = Math.max(1, image.naturalWidth || image.width || 1);
+  const srcH = Math.max(1, image.naturalHeight || image.height || 1);
+  const scale = Math.min(1, maxSide / Math.max(srcW, srcH));
+  const w = Math.max(1, Math.round(srcW * scale));
+  const h = Math.max(1, Math.round(srcH * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const c = canvas.getContext('2d');
+  c.drawImage(image, 0, 0, w, h);
+  return canvas.toDataURL('image/jpeg', 0.78);
+}
+
+function closePhotoOverlay() {
+  if (!photoOverlay || !photoOverlayImage) return;
+  photoOverlay.hidden = true;
+  photoOverlayImage.src = '';
+  resetOverlayView();
+  document.body.style.overflow = '';
 }
 
 function getImageFormatFromDataUrl(dataUrl) {
@@ -586,6 +1345,31 @@ function buildRotatedImageDataUrl(item) {
   c.translate(cw, 0);
   c.rotate(Math.PI / 2);
   c.drawImage(item.image, 0, 0);
+  return off.toDataURL('image/png');
+}
+
+function buildPlacementImageDataUrl(item) {
+  const crop = getCropPixels(item);
+  if (!item.rotated) {
+    const cw = Math.max(1, Math.round(crop.sw));
+    const ch = Math.max(1, Math.round(crop.sh));
+    const off = document.createElement('canvas');
+    off.width = cw;
+    off.height = ch;
+    const c = off.getContext('2d');
+    c.drawImage(item.image, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, cw, ch);
+    return off.toDataURL('image/png');
+  }
+
+  const cw = Math.max(1, Math.round(crop.sh));
+  const ch = Math.max(1, Math.round(crop.sw));
+  const off = document.createElement('canvas');
+  off.width = cw;
+  off.height = ch;
+  const c = off.getContext('2d');
+  c.translate(cw, 0);
+  c.rotate(Math.PI / 2);
+  c.drawImage(item.image, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, crop.sw, crop.sh);
   return off.toDataURL('image/png');
 }
 
@@ -638,14 +1422,14 @@ function buildPdfDocument(includePhotos) {
 
     for (const item of page) {
       if (includePhotos && item.dataUrl) {
-        const source = item.rotated ? buildRotatedImageDataUrl(item) : item.dataUrl;
+        const source = buildPlacementImageDataUrl(item);
         const format = getImageFormatFromDataUrl(source);
         pdf.addImage(source, format, item.xMm, item.yMm, item.widthMm, item.heightMm, undefined, 'NONE');
       }
 
       if (!includePhotos) {
-        pdf.setDrawColor(0, 0, 0);
-        pdf.setLineWidth(0.2);
+        pdf.setDrawColor(0, 255, 0);
+        pdf.setLineWidth(0.25 * MM_PER_POINT);
         pdf.rect(item.xMm, item.yMm, item.widthMm, item.heightMm);
       }
 
@@ -733,7 +1517,9 @@ async function handlePhotoInput(files) {
         originalWidthMm: pxToMm(image.naturalWidth, dpi),
         originalHeightMm: pxToMm(image.naturalHeight, dpi),
         image,
-        dataUrl
+        dataUrl,
+        thumbnailDataUrl: buildThumbnailDataUrl(image),
+        cropNorm: { x: 0, y: 0, w: 1, h: 1 }
       });
     } catch {
       skipped += 1;
@@ -757,6 +1543,7 @@ async function handlePhotoInput(files) {
   state.selectedId = null;
   state.currentPage = 0;
   selectedItemInput.value = 'Keins';
+  hideManualMenu();
   renderTable();
   drawPreview();
   if (skipped > 0) {
@@ -774,6 +1561,7 @@ function runNesting() {
   state.currentPage = 0;
   state.selectedId = null;
   selectedItemInput.value = 'Keins';
+  hideManualMenu();
 
   renderTable();
   drawPreview();
@@ -790,7 +1578,11 @@ function getSelectedPlacement() {
 function selectPlacementById(id) {
   state.selectedId = id;
   const item = getSelectedPlacement();
-  selectedItemInput.value = item ? item.name : 'Keins';
+  const photo = getPhotoById(id);
+  selectedItemInput.value = item ? item.name : (photo ? photo.name : 'Keins');
+  updateManualScaleControlsForSelected();
+  if (!id) hideManualMenu();
+  updatePhotoCardSelection();
   drawPreview();
 }
 
@@ -805,13 +1597,17 @@ function moveSelected(dx, dy) {
   const config = getConfig();
   const candidate = { ...selected, xMm: selected.xMm + dx, yMm: selected.yMm + dy };
 
-  if (!canPlaceCandidate(candidate, page, config, selected.id)) {
+  const snapped = findNearestFreePlacement(candidate, page, config, selected.id, {
+    maxRadiusMm: Math.max(120, Number(moveStepInput.value || 0) * 20),
+    angleSamples: 20
+  });
+  if (!snapped) {
     setStatus('Verschieben nicht moeglich (Kollision oder ausserhalb des Bogens).');
     return;
   }
 
-  selected.xMm = candidate.xMm;
-  selected.yMm = candidate.yMm;
+  selected.xMm = snapped.xMm;
+  selected.yMm = snapped.yMm;
   drawPreview();
   setStatus(`${selected.name} verschoben.`);
 }
@@ -825,21 +1621,31 @@ function rotateSelected() {
 
   const page = getCurrentPagePlacements();
   const config = getConfig();
+  const centerX = selected.xMm + selected.widthMm / 2;
+  const centerY = selected.yMm + selected.heightMm / 2;
   const candidate = {
     ...selected,
+    xMm: centerX - selected.heightMm / 2,
+    yMm: centerY - selected.widthMm / 2,
     widthMm: selected.heightMm,
     heightMm: selected.widthMm,
     rotated: !selected.rotated
   };
 
-  if (!canPlaceCandidate(candidate, page, config, selected.id)) {
+  const snapped = findNearestFreePlacement(candidate, page, config, selected.id, {
+    maxRadiusMm: Math.max(selected.widthMm, selected.heightMm) + 160,
+    angleSamples: 24
+  });
+  if (!snapped) {
     setStatus('Rotation nicht moeglich (Kollision oder ausserhalb des Bogens).');
     return;
   }
 
-  selected.widthMm = candidate.widthMm;
-  selected.heightMm = candidate.heightMm;
-  selected.rotated = candidate.rotated;
+  selected.xMm = snapped.xMm;
+  selected.yMm = snapped.yMm;
+  selected.widthMm = snapped.widthMm;
+  selected.heightMm = snapped.heightMm;
+  selected.rotated = snapped.rotated;
   drawPreview();
   setStatus(`${selected.name} rotiert.`);
 }
@@ -877,7 +1683,8 @@ function saveProject() {
       pixelHeight: photo.pixelHeight,
       originalWidthMm: photo.originalWidthMm,
       originalHeightMm: photo.originalHeightMm,
-      dataUrl: photo.dataUrl
+      dataUrl: photo.dataUrl,
+      cropNorm: photo.cropNorm || { x: 0, y: 0, w: 1, h: 1 }
     })),
     pages: state.pages.map((page) =>
       page.map((item) => ({
@@ -914,7 +1721,9 @@ async function loadProjectFromFile(file) {
       originalWidthMm: p.originalWidthMm,
       originalHeightMm: p.originalHeightMm,
       dataUrl: p.dataUrl,
-      image
+      image,
+      thumbnailDataUrl: buildThumbnailDataUrl(image),
+      cropNorm: p.cropNorm || { x: 0, y: 0, w: 1, h: 1 }
     });
   }
 
@@ -943,6 +1752,7 @@ async function loadProjectFromFile(file) {
   state.currentPage = Math.min(Math.max(0, project.currentPage || 0), Math.max(0, pages.length - 1));
   state.selectedId = null;
   selectedItemInput.value = 'Keins';
+  hideManualMenu();
 
   renderTable();
   drawPreview();
@@ -955,6 +1765,7 @@ function clearAll() {
   state.selectedId = null;
   state.currentPage = 0;
   selectedItemInput.value = 'Keins';
+  hideManualMenu();
   photoInput.value = '';
   projectLoadInput.value = '';
   renderTable();
@@ -965,6 +1776,7 @@ function clearAll() {
 function goToPage(index) {
   if (state.pages.length === 0) {
     state.currentPage = 0;
+    hideManualMenu();
     drawPreview();
     return;
   }
@@ -972,6 +1784,7 @@ function goToPage(index) {
   state.currentPage = Math.min(Math.max(0, index), state.pages.length - 1);
   state.selectedId = null;
   selectedItemInput.value = 'Keins';
+  hideManualMenu();
   drawPreview();
 }
 
@@ -1017,10 +1830,49 @@ function findItemAtCanvasPoint(px, py, page, config) {
 }
 
 function stopDrag() {
+  suppressCanvasClick = state.drag.moved;
   state.drag.active = false;
   state.drag.id = null;
   state.drag.offsetXmm = 0;
   state.drag.offsetYmm = 0;
+  state.drag.moved = false;
+  state.drag.startClientX = 0;
+  state.drag.startClientY = 0;
+}
+
+function hideManualMenu() {
+  if (manualNestingMenu) {
+    manualNestingMenu.hidden = true;
+  }
+}
+
+function showManualMenuAtCanvasEvent(event) {
+  if (!manualNestingMenu) return;
+
+  const canvasRect = previewCanvas.getBoundingClientRect();
+  const parent = manualNestingMenu.offsetParent instanceof HTMLElement
+    ? manualNestingMenu.offsetParent
+    : previewCanvas.parentElement;
+  if (!parent) return;
+
+  const parentRect = parent.getBoundingClientRect();
+  let left = event.clientX - parentRect.left + 10;
+  let top = event.clientY - parentRect.top + 10;
+
+  manualNestingMenu.hidden = false;
+  const menuWidth = manualNestingMenu.offsetWidth;
+  const menuHeight = manualNestingMenu.offsetHeight;
+
+  const minLeft = canvasRect.left - parentRect.left + 8;
+  const maxLeft = canvasRect.right - parentRect.left - menuWidth - 8;
+  const minTop = canvasRect.top - parentRect.top + 8;
+  const maxTop = canvasRect.bottom - parentRect.top - menuHeight - 8;
+
+  left = Math.min(Math.max(left, minLeft), Math.max(minLeft, maxLeft));
+  top = Math.min(Math.max(top, minTop), Math.max(minTop, maxTop));
+
+  manualNestingMenu.style.left = `${left}px`;
+  manualNestingMenu.style.top = `${top}px`;
 }
 
 photoInput.addEventListener('change', async (event) => {
@@ -1063,9 +1915,15 @@ prevPageBtn.addEventListener('click', () => goToPage(state.currentPage - 1));
 nextPageBtn.addEventListener('click', () => goToPage(state.currentPage + 1));
 
 previewCanvas.addEventListener('click', (event) => {
+  if (suppressCanvasClick) {
+    suppressCanvasClick = false;
+    return;
+  }
+
   const page = getCurrentPagePlacements();
   if (page.length === 0) {
     selectPlacementById(null);
+    hideManualMenu();
     return;
   }
 
@@ -1074,10 +1932,12 @@ previewCanvas.addEventListener('click', (event) => {
   const item = findItemAtCanvasPoint(px, py, page, config);
   if (item) {
     selectPlacementById(item.id);
+    showManualMenuAtCanvasEvent(event);
     return;
   }
 
   selectPlacementById(null);
+  hideManualMenu();
 });
 
 previewCanvas.addEventListener('mousedown', (event) => {
@@ -1089,15 +1949,27 @@ previewCanvas.addEventListener('mousedown', (event) => {
   const item = findItemAtCanvasPoint(px, py, page, config);
   if (!item) return;
 
+  hideManualMenu();
   selectPlacementById(item.id);
   state.drag.active = true;
   state.drag.id = item.id;
   state.drag.offsetXmm = xMm - item.xMm;
   state.drag.offsetYmm = yMm - item.yMm;
+  state.drag.moved = false;
+  state.drag.startClientX = event.clientX;
+  state.drag.startClientY = event.clientY;
 });
 
 previewCanvas.addEventListener('mousemove', (event) => {
   if (!state.drag.active || !state.drag.id) return;
+
+  if (!state.drag.moved) {
+    const dx = event.clientX - state.drag.startClientX;
+    const dy = event.clientY - state.drag.startClientY;
+    if (Math.hypot(dx, dy) >= 3) {
+      state.drag.moved = true;
+    }
+  }
 
   const page = getCurrentPagePlacements();
   const selected = page.find((item) => item.id === state.drag.id);
@@ -1108,28 +1980,325 @@ previewCanvas.addEventListener('mousemove', (event) => {
 
   const config = getConfig();
   const { xMm, yMm } = canvasEventToMm(event, config);
-  let nextX = xMm - state.drag.offsetXmm;
-  let nextY = yMm - state.drag.offsetYmm;
-
-  const minX = config.padding;
-  const maxX = config.rollWidth - config.padding - selected.widthMm;
-  const minY = config.padding;
-  const maxY = config.maxHeight - config.padding - selected.heightMm;
-  nextX = Math.min(Math.max(nextX, minX), maxX);
-  nextY = Math.min(Math.max(nextY, minY), maxY);
-
-  const candidate = { ...selected, xMm: nextX, yMm: nextY };
-  if (!canPlaceCandidate(candidate, page, config, selected.id)) {
+  const candidate = { ...selected, xMm: xMm - state.drag.offsetXmm, yMm: yMm - state.drag.offsetYmm };
+  const snapped = findNearestFreePlacement(candidate, page, config, selected.id, {
+    maxRadiusMm: 60,
+    angleSamples: 16
+  });
+  if (!snapped) {
     return;
   }
 
-  selected.xMm = nextX;
-  selected.yMm = nextY;
+  selected.xMm = snapped.xMm;
+  selected.yMm = snapped.yMm;
   drawPreview();
 });
 
 previewCanvas.addEventListener('mouseup', stopDrag);
 previewCanvas.addEventListener('mouseleave', stopDrag);
+
+if (menuRotateBtn) {
+  menuRotateBtn.addEventListener('click', () => rotateSelected());
+}
+
+if (menuUnplaceBtn) {
+  menuUnplaceBtn.addEventListener('click', () => unplaceSelected());
+}
+
+if (menuLeftBtn) {
+  menuLeftBtn.addEventListener('click', () => moveSelected(-Number(moveStepInput.value || 0), 0));
+}
+
+if (menuRightBtn) {
+  menuRightBtn.addEventListener('click', () => moveSelected(Number(moveStepInput.value || 0), 0));
+}
+
+if (menuUpBtn) {
+  menuUpBtn.addEventListener('click', () => moveSelected(0, -Number(moveStepInput.value || 0)));
+}
+
+if (menuDownBtn) {
+  menuDownBtn.addEventListener('click', () => moveSelected(0, Number(moveStepInput.value || 0)));
+}
+
+if (menuShowImageBtn) {
+  menuShowImageBtn.addEventListener('click', () => {
+    const selected = getSelectedPlacement();
+    if (selected) openPhotoOverlay(selected);
+  });
+}
+
+if (menuCropBtn) {
+  menuCropBtn.addEventListener('click', () => openCropOverlayForSelected());
+}
+
+if (menuApplyScaleBtn) {
+  menuApplyScaleBtn.addEventListener('click', () => applyScaleToSelected());
+}
+
+if (menuScaleWidthCm) {
+  menuScaleWidthCm.addEventListener('input', () => {
+    manualScaleLastEdited = 'width';
+    syncScaleInputsByRatio('width');
+  });
+}
+
+if (menuScaleHeightCm) {
+  menuScaleHeightCm.addEventListener('input', () => {
+    manualScaleLastEdited = 'height';
+    syncScaleInputsByRatio('height');
+  });
+}
+
+if (photoOverlayCloseBtn) {
+  photoOverlayCloseBtn.addEventListener('click', closePhotoOverlay);
+}
+
+if (photoOverlay) {
+  photoOverlay.addEventListener('click', (event) => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.dataset.closeOverlay === 'true') {
+      closePhotoOverlay();
+    }
+  });
+}
+
+if (photoOverlayViewport) {
+  photoOverlayViewport.addEventListener('pointerdown', (event) => {
+    if (photoOverlay.hidden) return;
+    if (event.button !== 0) return;
+    event.preventDefault();
+    overlayView.dragging = true;
+    overlayView.pointerId = event.pointerId;
+    overlayView.startX = event.clientX;
+    overlayView.startY = event.clientY;
+    overlayView.startTx = overlayView.tx;
+    overlayView.startTy = overlayView.ty;
+    photoOverlayViewport.classList.add('is-dragging');
+    if (typeof photoOverlayViewport.setPointerCapture === 'function') {
+      try {
+        photoOverlayViewport.setPointerCapture(event.pointerId);
+      } catch {
+        // Ignore capture errors; dragging still works without capture.
+      }
+    }
+  });
+
+  photoOverlayViewport.addEventListener('pointermove', (event) => {
+    if (!overlayView.dragging || overlayView.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const dx = event.clientX - overlayView.startX;
+    const dy = event.clientY - overlayView.startY;
+    overlayView.tx = overlayView.startTx + dx;
+    overlayView.ty = overlayView.startTy + dy;
+    applyOverlayTransform();
+  });
+
+  const endOverlayDrag = (event) => {
+    if (overlayView.pointerId !== event.pointerId) return;
+    overlayView.dragging = false;
+    overlayView.pointerId = null;
+    photoOverlayViewport.classList.remove('is-dragging');
+  };
+
+  photoOverlayViewport.addEventListener('pointerup', endOverlayDrag);
+  photoOverlayViewport.addEventListener('pointercancel', endOverlayDrag);
+
+  photoOverlayViewport.addEventListener('wheel', (event) => {
+    if (photoOverlay.hidden) return;
+    event.preventDefault();
+    const step = event.deltaY < 0 ? 0.12 : -0.12;
+    const nextScale = Math.min(6, Math.max(1, overlayView.scale + step));
+    if (Math.abs(nextScale - overlayView.scale) < 1e-6) return;
+    overlayView.scale = nextScale;
+    applyOverlayTransform();
+  }, { passive: false });
+}
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    if (cropOverlay && !cropOverlay.hidden) {
+      closeCropOverlay();
+      return;
+    }
+    closePhotoOverlay();
+  }
+});
+
+if (cropOverlayCanvas) {
+  cropOverlayCanvas.addEventListener('pointerdown', (event) => {
+    if (!cropEditor.active) return;
+    if (event.button !== 0) return;
+    const selected = getSelectedPlacement();
+    if (!selected) return;
+    event.preventDefault();
+    const rect = cropOverlayCanvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const rectCanvas = getCropRectCanvas(selected);
+    const handle = getHandleAtCanvasPoint(selected, x, y);
+
+    if (handle) {
+      cropEditor.dragging = true;
+      cropEditor.dragMode = 'resize';
+      cropEditor.activeHandle = handle;
+      cropEditor.pointerId = event.pointerId;
+      cropEditor.resizeAnchor = getResizeAnchorForHandle(handle, cropEditor.rect);
+      cropOverlayCanvas.setPointerCapture(event.pointerId);
+      return;
+    }
+
+    const rx = rectCanvas.x;
+    const ry = rectCanvas.y;
+    const rw = rectCanvas.w;
+    const rh = rectCanvas.h;
+    if (x >= rx && x <= rx + rw && y >= ry && y <= ry + rh) {
+      cropEditor.dragging = true;
+      cropEditor.dragMode = 'move';
+      cropEditor.activeHandle = null;
+      cropEditor.pointerId = event.pointerId;
+      cropEditor.dragOffsetX = x - rx;
+      cropEditor.dragOffsetY = y - ry;
+      cropOverlayCanvas.setPointerCapture(event.pointerId);
+    }
+  });
+
+  cropOverlayCanvas.addEventListener('pointermove', (event) => {
+    if (!cropEditor.active) return;
+    const selected = getSelectedPlacement();
+    if (!selected) return;
+
+    const rect = cropOverlayCanvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    if (!cropEditor.dragging || cropEditor.pointerId !== event.pointerId) {
+      const handle = getHandleAtCanvasPoint(selected, x, y);
+      if (handle === 'nw' || handle === 'se') {
+        cropOverlayCanvas.style.cursor = 'nwse-resize';
+      } else if (handle === 'ne' || handle === 'sw') {
+        cropOverlayCanvas.style.cursor = 'nesw-resize';
+      } else {
+        const rcv = getCropRectCanvas(selected);
+        const inside = x >= rcv.x && x <= rcv.x + rcv.w && y >= rcv.y && y <= rcv.y + rcv.h;
+        cropOverlayCanvas.style.cursor = inside ? 'move' : 'grab';
+      }
+      return;
+    }
+
+    event.preventDefault();
+    const d = cropEditor.display;
+    const iw = selected.image.naturalWidth;
+    const ih = selected.image.naturalHeight;
+
+    if (cropEditor.dragMode === 'resize' && cropEditor.activeHandle && cropEditor.resizeAnchor) {
+      const pointerPx = canvasToImagePoint(selected, x, y);
+      cropEditor.rect = buildRectFromHandleDrag(
+        cropEditor.activeHandle,
+        cropEditor.resizeAnchor,
+        pointerPx,
+        cropEditor.aspect,
+        iw,
+        ih
+      );
+    } else if (cropEditor.dragMode === 'move') {
+      const nx = ((x - cropEditor.dragOffsetX - d.x) / d.w) * iw;
+      const ny = ((y - cropEditor.dragOffsetY - d.y) / d.h) * ih;
+      cropEditor.rect = clampCropRect({ ...cropEditor.rect, x: nx, y: ny }, iw, ih);
+    }
+
+    renderCropOverlay();
+    updateCropRectInputs();
+    updateCropOverlayDpiInfo();
+  });
+
+  cropOverlayCanvas.addEventListener('pointerup', (event) => {
+    if (cropEditor.pointerId !== event.pointerId) return;
+    cropEditor.dragging = false;
+    cropEditor.dragMode = null;
+    cropEditor.activeHandle = null;
+    cropEditor.pointerId = null;
+    cropEditor.resizeAnchor = null;
+  });
+  cropOverlayCanvas.addEventListener('pointercancel', (event) => {
+    if (cropEditor.pointerId !== event.pointerId) return;
+    cropEditor.dragging = false;
+    cropEditor.dragMode = null;
+    cropEditor.activeHandle = null;
+    cropEditor.pointerId = null;
+    cropEditor.resizeAnchor = null;
+  });
+
+  cropOverlayCanvas.addEventListener('wheel', (event) => {
+    if (!cropEditor.active) return;
+    event.preventDefault();
+    const selected = getSelectedPlacement();
+    if (!selected) return;
+    const factor = event.deltaY < 0 ? 0.94 : 1.06;
+    const r = cropEditor.rect;
+    const cx = r.x + r.w / 2;
+    const cy = r.y + r.h / 2;
+    let nw = Math.max(24, Math.min(selected.image.naturalWidth, r.w * factor));
+    let nh = nw / cropEditor.aspect;
+    if (nh > selected.image.naturalHeight) {
+      nh = selected.image.naturalHeight;
+      nw = nh * cropEditor.aspect;
+    }
+    cropEditor.rect = clampCropRect({ x: cx - nw / 2, y: cy - nh / 2, w: nw, h: nh }, selected.image.naturalWidth, selected.image.naturalHeight);
+    renderCropOverlay();
+    updateCropRectInputs();
+    updateCropOverlayDpiInfo();
+  }, { passive: false });
+}
+
+if (cropTargetWidthCm) {
+  cropTargetWidthCm.addEventListener('input', () => {
+    updateCropAspectFromInputs();
+    updateCropRectInputs();
+  });
+}
+
+if (cropTargetHeightCm) {
+  cropTargetHeightCm.addEventListener('input', () => {
+    updateCropAspectFromInputs();
+    updateCropRectInputs();
+  });
+}
+
+if (cropRectXPercent) {
+  cropRectXPercent.addEventListener('input', () => applyCropRectInputs('x'));
+}
+
+if (cropRectYPercent) {
+  cropRectYPercent.addEventListener('input', () => applyCropRectInputs('y'));
+}
+
+if (cropRectWPercent) {
+  cropRectWPercent.addEventListener('input', () => applyCropRectInputs('w'));
+}
+
+if (cropRectHPercent) {
+  cropRectHPercent.addEventListener('input', () => applyCropRectInputs('h'));
+}
+
+if (cropOverlayApplyBtn) {
+  cropOverlayApplyBtn.addEventListener('click', () => applyCropOverlay());
+}
+
+if (cropOverlayCancelBtn) {
+  cropOverlayCancelBtn.addEventListener('click', () => closeCropOverlay());
+}
+
+if (cropOverlay) {
+  cropOverlay.addEventListener('click', (event) => {
+    const target = event.target;
+    if (target instanceof HTMLElement && target.dataset.closeCropOverlay === 'true') {
+      closeCropOverlay();
+    }
+  });
+}
+
+closePhotoOverlay();
 
 rotateBtn.addEventListener('click', rotateSelected);
 unplaceBtn.addEventListener('click', unplaceSelected);

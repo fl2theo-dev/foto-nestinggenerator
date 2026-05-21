@@ -396,6 +396,7 @@
         <span class="pill">Regmark-Durchmesser: 5 mm</span>
         <span class="pill">4 Regmarks pro Bogen</span>
         <span class="pill">Max-Hoehe = Obergrenze, Cut auf Nutzhoehe</span>
+        <span class="pill">Beschnitteditor mit greifbaren Ecken</span>
       </article>
 
       <section class="grid-3">
@@ -406,6 +407,7 @@
             <li>Rollenbreiten: 17, 24, 40 Zoll.</li>
             <li>Nesting mit globalem Strategievergleich fuer materialsparende Orientierung.</li>
             <li>Rotation 0/90 Grad konfigurierbar.</li>
+            <li>Beschnittbereich interaktiv per Eck-Handles definieren und per Eingabefelder verfeinern.</li>
           </ul>
         </article>
 
@@ -543,7 +545,7 @@
         <div class="grid-2">
           <div class="form-row">
             <label for="releaseVersionInput">Version</label>
-            <input id="releaseVersionInput" type="text" value="0.3.1" />
+            <input id="releaseVersionInput" type="text" value="0.3.2" />
           </div>
           <div class="form-row">
             <label for="releaseDateInput">Datum (YYYY-MM-DD)</label>
@@ -553,14 +555,14 @@
 
         <div class="form-row">
           <label for="releaseSummaryInput">Summary</label>
-          <input id="releaseSummaryInput" type="text" value="Kurzbeschreibung des neuen Entwicklungsstands." />
+          <input id="releaseSummaryInput" type="text" value="Beschnitt-Overlay mit greifbaren Ecken, Feintuning-Feldern und Live-DPI verbessert." />
         </div>
 
         <div class="form-row">
           <label for="releaseChangesInput">Aenderungen (eine Zeile pro Punkt)</label>
-          <textarea id="releaseChangesInput" rows="5">Neuer Eintragspunkt 1
-Neuer Eintragspunkt 2
-Neuer Eintragspunkt 3</textarea>
+          <textarea id="releaseChangesInput" rows="5">Beschnittbereich kann jetzt direkt ueber Eck-Handles gegriffen und skaliert werden.
+      Neue Eingabefelder fuer X/Y/Breite/Hoehe des Ausschnitts in Prozent zum Feintuning.
+      Live-DPI-Anzeige basiert auf Ausschnittpixeln und Zielgroesse.</textarea>
         </div>
 
         <div class="btn-row">
@@ -679,6 +681,16 @@ Neuer Eintragspunkt 3</textarea>
 
     const fallbackVersionData = {
       releases: [
+        {
+          version: '0.3.2',
+          date: '2026-05-21',
+          summary: 'Beschnitt-Overlay auf praezise manuelle Steuerung mit Eck-Handles und Feintuning ausgebaut.',
+          changes: [
+            'Ausschnitt im Overlay kann ueber greifbare Ecken direkt skaliert werden (Resize statt nur Zoom).',
+            'Feinsteuerung per Eingabefeldern fuer X/Y/Breite/Hoehe des Beschnitts in Prozent ergaenzt.',
+            'Live-DPI-Anzeige im Beschnittdialog aktualisiert sich konsistent bei Maus- und Eingabefeld-Aenderungen.'
+          ]
+        },
         {
           version: '0.3.1',
           date: '2026-05-21',

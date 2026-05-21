@@ -113,25 +113,84 @@
         <button id="nextPageBtn" class="secondary">Seite weiter</button>
       </div>
       <p id="effectiveHeightInfo" class="hint">Effektive Seitenhoehe: -</p>
-      <canvas id="previewCanvas" width="1400" height="900"></canvas>
+      <div class="preview-canvas-wrap">
+        <canvas id="previewCanvas" width="1400" height="900"></canvas>
+        <div id="manualNestingMenu" class="manual-menu" hidden>
+          <button id="menuRotateBtn" class="manual-btn" title="Rotation 90 Grad">Rotieren</button>
+          <button id="menuUnplaceBtn" class="manual-btn" title="Zurueck in Liste">Zurueck</button>
+          <button id="menuUpBtn" class="manual-btn" title="Nach oben">↑</button>
+          <button id="menuLeftBtn" class="manual-btn" title="Nach links">←</button>
+          <button id="menuRightBtn" class="manual-btn" title="Nach rechts">→</button>
+          <button id="menuDownBtn" class="manual-btn" title="Nach unten">↓</button>
+          <button id="menuShowImageBtn" class="manual-btn" title="Bild im Overlay anzeigen">Bild anzeigen</button>
+          <button id="menuCropBtn" class="manual-btn" title="Beschnitt auf Zielgroesse festlegen">Beschnitt festlegen</button>
+          <div class="manual-scale">
+            <div class="manual-scale-line"><strong>Aktuelle Groesse:</strong> <span id="menuCurrentSizeValue">-</span></div>
+            <div class="manual-scale-grid">
+              <label for="menuScaleWidthCm">Zielbreite (cm)</label>
+              <input id="menuScaleWidthCm" type="number" min="0.1" step="0.1" />
+              <label for="menuScaleHeightCm">Zielhoehe (cm)</label>
+              <input id="menuScaleHeightCm" type="number" min="0.1" step="0.1" />
+              <label for="menuScaleDpi">DPI</label>
+              <input id="menuScaleDpi" type="number" min="1" step="1" />
+            </div>
+            <button id="menuApplyScaleBtn" class="manual-btn" title="Skalierung uebernehmen">Skalierung anwenden</button>
+          </div>
+        </div>
+      </div>
       <p class="hint">Regmarks: 4 pro Bogen (außen, für Cutter-Scan). Drag & Drop für manuelles Platzieren im Canvas.</p>
     </section>
 
     <section class="panel list">
       <h2>Motive</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Pixel</th>
-            <th>mm</th>
-            <th>Platziert</th>
-          </tr>
-        </thead>
-        <tbody id="photoTableBody"></tbody>
-      </table>
+      <div id="photoTableBody" class="photo-card-list"></div>
     </section>
   </main>
+
+  <div id="photoOverlay" class="photo-overlay" hidden>
+    <div class="photo-overlay-backdrop" data-close-overlay="true"></div>
+    <div class="photo-overlay-content" role="dialog" aria-modal="true" aria-label="Bildvorschau">
+      <button id="photoOverlayCloseBtn" class="photo-overlay-close" aria-label="Vorschau schließen">x</button>
+      <div id="photoOverlayViewport" class="photo-overlay-viewport">
+        <img id="photoOverlayImage" alt="Vollansicht Motiv" />
+      </div>
+      <p id="photoOverlayCaption" class="photo-overlay-caption"></p>
+    </div>
+  </div>
+
+  <div id="cropOverlay" class="crop-overlay" hidden>
+    <div class="crop-overlay-backdrop" data-close-crop-overlay="true"></div>
+    <div class="crop-overlay-content" role="dialog" aria-modal="true" aria-label="Beschnitt festlegen">
+      <div class="crop-overlay-head">
+        <strong>Beschnittbereich festlegen</strong>
+        <div class="crop-overlay-actions">
+          <button id="cropOverlayCancelBtn" class="secondary">Abbrechen</button>
+          <button id="cropOverlayApplyBtn">Beschnitt uebernehmen</button>
+        </div>
+      </div>
+      <div class="crop-overlay-meta">
+        <div class="crop-overlay-size-grid">
+          <label for="cropTargetWidthCm">Zielbreite (cm)</label>
+          <input id="cropTargetWidthCm" type="number" min="0.1" step="0.1" />
+          <label for="cropTargetHeightCm">Zielhoehe (cm)</label>
+          <input id="cropTargetHeightCm" type="number" min="0.1" step="0.1" />
+        </div>
+        <div class="crop-overlay-rect-grid">
+          <label for="cropRectXPercent">Ausschnitt X (%)</label>
+          <input id="cropRectXPercent" type="number" min="0" max="100" step="0.1" />
+          <label for="cropRectYPercent">Ausschnitt Y (%)</label>
+          <input id="cropRectYPercent" type="number" min="0" max="100" step="0.1" />
+          <label for="cropRectWPercent">Breite (%)</label>
+          <input id="cropRectWPercent" type="number" min="0.1" max="100" step="0.1" />
+          <label for="cropRectHPercent">Hoehe (%)</label>
+          <input id="cropRectHPercent" type="number" min="0.1" max="100" step="0.1" />
+        </div>
+        <p id="cropOverlayDpiInfo" class="hint">DPI: -</p>
+      </div>
+      <canvas id="cropOverlayCanvas" width="1200" height="760"></canvas>
+      <p class="hint">Gesamtes Bild bleibt sichtbar. Rechteck ziehen = Position, Mausrad = Ausschnittgroesse.</p>
+    </div>
+  </div>
 
   <script src="../node_modules/jspdf/dist/jspdf.umd.min.js"></script>
   <script type="module" src="./main.js"></script>
