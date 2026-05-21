@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Foto-Nesting Projektkonzept und UI-Dummy</title>
+  <style>
+    :root {
+      --bg: #f3f1ea;
+      --panel: #fffdf8;
+      --ink: #1f2421;
+      --muted: #5e6a64;
+      --line: #d8d2c3;
+      --accent: #0f6b5f;
+      --accent-soft: #d9efe8;
+      --warn: #a25c2f;
+      --shadow: 0 14px 40px rgba(14, 24, 20, 0.12);
+      --radius: 16px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 15% 10%, #ffffff 0%, #f3f1ea 42%),
+        linear-gradient(160deg, #ece7dc 0%, #f3f1ea 38%, #ebe5d9 100%);
+      min-height: 100vh;
+    }
+
+    .shell {
+      width: min(1200px, 94vw);
+      margin: 32px auto 44px;
+      display: grid;
+      gap: 18px;
+    }
+
+    .hero {
+      background: linear-gradient(145deg, #15312b 0%, #0f6b5f 55%, #4f8a66 100%);
+      color: #f8fff8;
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      padding: 28px 26px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      width: 280px;
+      height: 280px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.08);
+      right: -80px;
+      top: -120px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(1.8rem, 2.6vw, 2.6rem);
+      letter-spacing: 0.02em;
+      line-height: 1.05;
+    }
+
+    .hero p {
+      margin: 12px 0 0;
+      max-width: 80ch;
+      line-height: 1.4;
+      color: #e6fff2;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .tab {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.2s ease, background 0.2s ease;
+    }
+
+    .tab.active {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+    }
+
+    .tab:hover {
+      transform: translateY(-1px);
+    }
+
+    .pane {
+      display: none;
+      gap: 14px;
+    }
+
+    .pane.active {
+      display: grid;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 18px;
+      box-shadow: 0 6px 18px rgba(12, 20, 16, 0.05);
+    }
+
+    .card h2,
+    .card h3 {
+      margin-top: 0;
+      margin-bottom: 8px;
+      letter-spacing: 0.02em;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .pill {
+      display: inline-block;
+      font-size: 0.82rem;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: #114f45;
+      font-weight: 700;
+      margin-right: 8px;
+      margin-bottom: 8px;
+    }
+
+    ul,
+    ol {
+      margin: 0;
+      padding-left: 20px;
+      line-height: 1.45;
+    }
+
+    .timeline {
+      border-left: 3px solid #c8dfd6;
+      margin-left: 8px;
+      padding-left: 16px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .phase strong {
+      color: #174e46;
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .dummy-layout {
+      display: grid;
+      grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+      gap: 14px;
+    }
+
+    .form-row {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+
+    label {
+      font-weight: 700;
+      font-size: 0.92rem;
+      color: #1f3f39;
+    }
+
+    input,
+    select,
+    button {
+      font: inherit;
+    }
+
+    input,
+    select {
+      width: 100%;
+      padding: 10px 11px;
+      border: 1px solid #ccc2ae;
+      border-radius: 10px;
+      background: #fffcf5;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-weight: 700;
+      cursor: pointer;
+      background: #d9efe8;
+      color: #10483f;
+    }
+
+    .btn.primary {
+      background: var(--accent);
+      color: white;
+    }
+
+    .btn.warn {
+      background: #f6dfcf;
+      color: var(--warn);
+    }
+
+    .summary {
+      font-size: 0.92rem;
+      color: var(--muted);
+      margin: 10px 0 4px;
+    }
+
+    .photo-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      max-height: 180px;
+      overflow: auto;
+      border: 1px dashed #c5bead;
+      border-radius: 10px;
+      background: #fffaf0;
+    }
+
+    .photo-list li {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px 10px;
+      border-bottom: 1px solid #efe8db;
+      font-size: 0.9rem;
+    }
+
+    .photo-list li:last-child {
+      border-bottom: 0;
+    }
+
+    .preview-wrap {
+      background: #f5f2e8;
+      border-radius: 14px;
+      border: 1px solid #d4ccb8;
+      padding: 10px;
+    }
+
+    svg {
+      width: 100%;
+      height: auto;
+      border-radius: 10px;
+      background: #fffdf8;
+      border: 1px solid #d5cfbf;
+    }
+
+    .legend {
+      display: flex;
+      gap: 12px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+      font-size: 0.85rem;
+      color: #4f5a55;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 6px;
+    }
+
+    .dot.photo { background: #9fd0c4; }
+    .dot.cut { background: transparent; border: 2px solid #1f2421; }
+    .dot.reg { background: #1f2421; }
+
+    @media (max-width: 980px) {
+      .grid-3 {
+        grid-template-columns: 1fr;
+      }
+
+      .grid-2,
+      .dummy-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <h1>Foto-Nesting: Projektkonzept und UI-Dummy</h1>
+      <p>
+        Diese Seite kombiniert die fachliche Projektbeschreibung mit einem kleinen interaktiven
+        Dummy fuer die gemeinsame UI-Entwicklung. Fokus: exakte Geometrie, reproduzierbare Regmarks
+        und duale Ausgabe fuer Druck und Kontur.
+      </p>
+      <p>Datum: 21. Mai 2026</p>
+    </header>
+
+    <nav class="tabs" aria-label="Ansichten">
+      <button class="tab active" data-pane="konzept">Konzept</button>
+      <button class="tab" data-pane="roadmap">Roadmap</button>
+      <button class="tab" data-pane="architektur">Architektur</button>
+      <button class="tab" data-pane="versionierung">Versionierung</button>
+      <button class="tab" data-pane="dummy">UI-Dummy</button>
+    </nav>
+
+    <section class="pane active" id="pane-konzept">
+      <article class="card">
+        <h2>Projektziel</h2>
+        <p>
+          Entwicklung einer Anwendung, die mehrere Fotos auf Rollenmaterial nestet, pro Motiv
+          vier Regmarks setzt und zwei synchronisierte Produktionsdateien erzeugt:
+          Druckdatei (Foto + Regmarks) und Konturdatei (Regmarks + Schneidekontur).
+        </p>
+        <span class="pill">Regmark-Durchmesser: 5 mm</span>
+        <span class="pill">Regmark-Abstand: 3 mm</span>
+        <span class="pill">Max. Hoehe Standard: 1200 mm</span>
+      </article>
+
+      <section class="grid-3">
+        <article class="card">
+          <h3>Eingang und Nesting</h3>
+          <ul>
+            <li>Mehrere Fotos je Job laden.</li>
+            <li>Rollenbreiten: 17, 24, 40 Zoll.</li>
+            <li>Nesting-Logik aus vorhandenem MaxRects-Ansatz uebernehmen.</li>
+            <li>Rotation 0/90 Grad konfigurierbar.</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <h3>Ausgabe</h3>
+          <ul>
+            <li>Datei A: Druckdaten mit Motiv und Regmarks.</li>
+            <li>Datei B: Regmarks und Schneidekontur.</li>
+            <li>Beide Dateien aus derselben Geometriequelle.</li>
+            <li>Deckungsgleiche Koordinaten als Muss-Kriterium.</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <h3>Druckanbindung</h3>
+          <ol>
+            <li>Manuelle RIP-Zufuehrung.</li>
+            <li>Hotfolder als erster Integrationsschritt.</li>
+            <li>Direkte RIP-API je nach Hersteller.</li>
+          </ol>
+        </article>
+      </section>
+    </section>
+
+    <section class="pane" id="pane-roadmap">
+      <article class="card">
+        <h2>Roadmap</h2>
+        <div class="timeline">
+          <div class="phase">
+            <strong>Phase 0: Spezifikation</strong>
+            Regmark-Regel finalisieren, Ausgabeformat festlegen, Ziel-RIP bestimmen.
+          </div>
+          <div class="phase">
+            <strong>Phase 1: MVP</strong>
+            Bildimport, Rollenparameter, Nesting, Regmarks, dualer Export (Datei A/B).
+          </div>
+          <div class="phase">
+            <strong>Phase 2: Produktionshaertung</strong>
+            Preflight (DPI/Farbraum), Toleranztests, Material- und Jobreporting.
+          </div>
+          <div class="phase">
+            <strong>Phase 3: Druckintegration</strong>
+            Hotfolder-Workflow, danach optionale API-Anbindung, Queue-Status und Fehlerpfade.
+          </div>
+          <div class="phase">
+            <strong>Phase 4: Betrieb</strong>
+            Presets, Vorlagen, Historie und reproduzierbare Wiederholjobs.
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="pane" id="pane-architektur">
+      <section class="grid-2">
+        <article class="card">
+          <h2>Modulstruktur</h2>
+          <ol>
+            <li>Import und Preflight</li>
+            <li>Nesting-Core</li>
+            <li>Regmark- und Kontur-Generator</li>
+            <li>Render und Export</li>
+            <li>Optionaler Druck-Connector</li>
+          </ol>
+        </article>
+
+        <article class="card">
+          <h2>Genauigkeitsregeln</h2>
+          <ul>
+            <li>Interne Einheit ausschliesslich mm.</li>
+            <li>Ein gemeinsamer Ursprung fuer alle Ausgaben.</li>
+            <li>Keine zweite Geometrieberechnung fuer Datei B.</li>
+            <li>Automatischer Toleranztest mit max. 0.01 mm Abweichung.</li>
+          </ul>
+        </article>
+      </section>
+
+      <article class="card">
+        <h3>Technische Leitlinie</h3>
+        <p>
+          Der bestehende MaxRects-Kern wird in ein separates Core-Modul ueberfuehrt. Die UI
+          dient nur zur Parametrisierung und Vorschau. Export und Druckintegration greifen auf
+          denselben Szenengraphen zu, um jeden Versatz zwischen Druck- und Konturdatei zu vermeiden.
+        </p>
+      </article>
+    </section>
+
+    <section class="pane" id="pane-versionierung">
+      <article class="card">
+        <h2>Entwicklungslog und Versionierung</h2>
+        <p>
+          Dieser Bereich dokumentiert nachvollziehbar, welche Aenderungen am Projekt vorgenommen
+          wurden. Die Quelle der Wahrheit ist Git plus diese human-lesbare Zusammenfassung.
+        </p>
+        <span class="pill">SemVer: 0.1.0</span>
+        <span class="pill">Stand: 21. Mai 2026</span>
+      </article>
+
+      <section class="grid-2">
+        <article class="card">
+          <h3>Letzte Aenderungen</h3>
+          <ol>
+            <li>Projektordner foto-nestinggenerator angelegt.</li>
+            <li>Konzept als gestaltete HTML-Seite strukturiert.</li>
+            <li>Interaktiver UI-Dummy (Nesting-Vorschau) integriert.</li>
+            <li>Versionierungsbereich in der Konzept-HTML eingefuehrt.</li>
+            <li>Git-Basis fuer weitere Entwicklung vorbereitet.</li>
+          </ol>
+        </article>
+
+        <article class="card">
+          <h3>Regeln fuer nachvollziehbare Entwicklung</h3>
+          <ul>
+            <li>Jede fachliche Aenderung bekommt einen Commit mit klarer Nachricht.</li>
+            <li>Version in CHANGELOG und Tag konsistent halten.</li>
+            <li>UI- und Core-Aenderungen getrennt committen, wenn sinnvoll.</li>
+            <li>Meilensteine als Git-Tags markieren.</li>
+          </ul>
+        </article>
+      </section>
+
+      <article class="card">
+        <h3>GitHub-Workflow (vorgeschlagen)</h3>
+        <ol>
+          <li>Lokales Repo initialisieren und ersten Commit erstellen.</li>
+          <li>Remote-Repository foto-nestinggenerator auf GitHub anlegen.</li>
+          <li>Remote origin setzen und den Hauptbranch pushen.</li>
+          <li>Ab dann jede Iteration ueber Commits und optional Releases versionieren.</li>
+        </ol>
+      </article>
+    </section>
+
+    <section class="pane" id="pane-dummy">
+      <div class="dummy-layout">
+        <article class="card">
+          <h2>UI-Dummy fuer gemeinsame Gestaltung</h2>
+          <p class="summary">
+            Dieses Demo nestet Platzhalter rechteckig in der Vorschau und zeichnet Regmarks sowie
+            Schneidekontur. So koennen wir Bedienfluss und Informationsdichte abstimmen.
+          </p>
+
+          <div class="form-row">
+            <label for="rollWidth">Rollenbreite</label>
+            <select id="rollWidth">
+              <option value="431.8">17 Zoll (431.8 mm)</option>
+              <option value="609.6" selected>24 Zoll (609.6 mm)</option>
+              <option value="1016">40 Zoll (1016.0 mm)</option>
+            </select>
+          </div>
+
+          <div class="form-row">
+            <label for="maxHeight">Maximale Bahnhoehe (mm)</label>
+            <input id="maxHeight" type="number" min="100" max="3000" value="1200" />
+          </div>
+
+          <div class="form-row">
+            <label for="spacing">Abstand zwischen Motiven (mm)</label>
+            <input id="spacing" type="number" min="0" max="50" value="6" />
+          </div>
+
+          <div class="form-row">
+            <label for="sampleCount">Dummy-Fotos</label>
+            <input id="sampleCount" type="number" min="1" max="30" value="8" />
+          </div>
+
+          <div class="btn-row">
+            <button class="btn primary" id="generateBtn">Dummy generieren</button>
+            <button class="btn" id="nestBtn">Neu nesten</button>
+            <button class="btn warn" id="clearBtn">Leeren</button>
+          </div>
+
+          <p class="summary" id="jobStats">Noch keine Motive geladen.</p>
+          <ul class="photo-list" id="photoList"></ul>
+        </article>
+
+        <article class="card preview-wrap">
+          <h3>Vorschau (Druck + Kontur)</h3>
+          <svg id="preview" viewBox="0 0 1000 650" role="img" aria-label="Nesting Vorschau"></svg>
+          <div class="legend">
+            <span><span class="dot photo"></span>Motivflaeche</span>
+            <span><span class="dot cut"></span>Schneidekontur</span>
+            <span><span class="dot reg"></span>Regmarks (4x)</span>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const tabs = Array.from(document.querySelectorAll('.tab'));
+    const panes = {
+      konzept: document.getElementById('pane-konzept'),
+      roadmap: document.getElementById('pane-roadmap'),
+      architektur: document.getElementById('pane-architektur'),
+      versionierung: document.getElementById('pane-versionierung'),
+      dummy: document.getElementById('pane-dummy')
+    };
+
+    tabs.forEach((tab) => {
+      tab.addEventListener('click', () => {
+        tabs.forEach((t) => t.classList.remove('active'));
+        Object.values(panes).forEach((p) => p.classList.remove('active'));
+        tab.classList.add('active');
+        panes[tab.dataset.pane].classList.add('active');
+      });
+    });
+
+    const rollWidth = document.getElementById('rollWidth');
+    const maxHeight = document.getElementById('maxHeight');
+    const spacing = document.getElementById('spacing');
+    const sampleCount = document.getElementById('sampleCount');
+    const photoList = document.getElementById('photoList');
+    const jobStats = document.getElementById('jobStats');
+    const preview = document.getElementById('preview');
+
+    const generateBtn = document.getElementById('generateBtn');
+    const nestBtn = document.getElementById('nestBtn');
+    const clearBtn = document.getElementById('clearBtn');
+
+    let photos = [];
+    let placements = [];
+
+    function rand(min, max) {
+      return Math.round(min + Math.random() * (max - min));
+    }
+
+    function mmToView(mm, scale) {
+      return mm * scale;
+    }
+
+    function makeDummyPhotos(count) {
+      const list = [];
+      for (let i = 0; i < count; i++) {
+        const w = rand(90, 260);
+        const h = rand(120, 340);
+        list.push({
+          id: `IMG-${String(i + 1).padStart(2, '0')}`,
+          widthMm: w,
+          heightMm: h
+        });
+      }
+      return list;
+    }
+
+    function simpleNest(input, widthMm, heightMm, gapMm) {
+      const sorted = [...input].sort((a, b) => b.heightMm * b.widthMm - a.heightMm * a.widthMm);
+      const placed = [];
+      let cursorX = 0;
+      let cursorY = 0;
+      let rowHeight = 0;
+
+      for (const item of sorted) {
+        if (cursorX + item.widthMm > widthMm) {
+          cursorX = 0;
+          cursorY += rowHeight + gapMm;
+          rowHeight = 0;
+        }
+
+        if (cursorY + item.heightMm > heightMm) {
+          continue;
+        }
+
+        placed.push({
+          ...item,
+          xMm: cursorX,
+          yMm: cursorY
+        });
+
+        cursorX += item.widthMm + gapMm;
+        rowHeight = Math.max(rowHeight, item.heightMm);
+      }
+
+      return placed;
+    }
+
+    function draw() {
+      const widthMm = Number(rollWidth.value);
+      const heightMm = Number(maxHeight.value);
+      const pad = 20;
+      const vw = 1000;
+      const vh = 650;
+
+      const scale = Math.min((vw - pad * 2) / widthMm, (vh - pad * 2) / heightMm);
+      const usedHeight = placements.reduce((m, p) => Math.max(m, p.yMm + p.heightMm), 0);
+
+      preview.innerHTML = '';
+
+      const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      bg.setAttribute('x', String(pad));
+      bg.setAttribute('y', String(pad));
+      bg.setAttribute('width', String(mmToView(widthMm, scale)));
+      bg.setAttribute('height', String(mmToView(heightMm, scale)));
+      bg.setAttribute('fill', '#fffdf8');
+      bg.setAttribute('stroke', '#c9c2b2');
+      bg.setAttribute('stroke-width', '2');
+      preview.appendChild(bg);
+
+      placements.forEach((p) => {
+        const x = pad + mmToView(p.xMm, scale);
+        const y = pad + mmToView(p.yMm, scale);
+        const w = mmToView(p.widthMm, scale);
+        const h = mmToView(p.heightMm, scale);
+
+        const photo = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        photo.setAttribute('x', x.toFixed(2));
+        photo.setAttribute('y', y.toFixed(2));
+        photo.setAttribute('width', w.toFixed(2));
+        photo.setAttribute('height', h.toFixed(2));
+        photo.setAttribute('fill', '#9fd0c4');
+        photo.setAttribute('opacity', '0.75');
+        photo.setAttribute('stroke', '#2f5d54');
+        photo.setAttribute('stroke-width', '1.3');
+        preview.appendChild(photo);
+
+        const contour = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        contour.setAttribute('x', x.toFixed(2));
+        contour.setAttribute('y', y.toFixed(2));
+        contour.setAttribute('width', w.toFixed(2));
+        contour.setAttribute('height', h.toFixed(2));
+        contour.setAttribute('fill', 'none');
+        contour.setAttribute('stroke', '#1f2421');
+        contour.setAttribute('stroke-width', '1.2');
+        contour.setAttribute('stroke-dasharray', '6 4');
+        preview.appendChild(contour);
+
+        const regRadiusMm = 2.5;
+        const regOffsetMm = 3 + regRadiusMm;
+        const reg = [
+          { cx: p.xMm - regOffsetMm, cy: p.yMm + 18 },
+          { cx: p.xMm - regOffsetMm, cy: p.yMm + p.heightMm - 18 },
+          { cx: p.xMm + p.widthMm + regOffsetMm, cy: p.yMm + 18 },
+          { cx: p.xMm + p.widthMm + regOffsetMm, cy: p.yMm + p.heightMm - 18 }
+        ];
+
+        reg.forEach((r) => {
+          const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          c.setAttribute('cx', (pad + mmToView(r.cx, scale)).toFixed(2));
+          c.setAttribute('cy', (pad + mmToView(r.cy, scale)).toFixed(2));
+          c.setAttribute('r', mmToView(regRadiusMm, scale).toFixed(2));
+          c.setAttribute('fill', '#111111');
+          preview.appendChild(c);
+        });
+
+        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        label.textContent = p.id;
+        label.setAttribute('x', (x + 8).toFixed(2));
+        label.setAttribute('y', (y + 18).toFixed(2));
+        label.setAttribute('fill', '#113c34');
+        label.setAttribute('font-size', '13');
+        label.setAttribute('font-family', 'Trebuchet MS, sans-serif');
+        preview.appendChild(label);
+      });
+
+      const used = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      const usedY = pad + mmToView(usedHeight, scale);
+      used.setAttribute('x1', String(pad));
+      used.setAttribute('x2', String(pad + mmToView(widthMm, scale)));
+      used.setAttribute('y1', usedY.toFixed(2));
+      used.setAttribute('y2', usedY.toFixed(2));
+      used.setAttribute('stroke', '#b55f28');
+      used.setAttribute('stroke-width', '2');
+      used.setAttribute('stroke-dasharray', '4 5');
+      preview.appendChild(used);
+    }
+
+    function renderList() {
+      photoList.innerHTML = '';
+      photos.forEach((p) => {
+        const li = document.createElement('li');
+        li.innerHTML = `<span>${p.id}</span><span>${p.widthMm} x ${p.heightMm} mm</span>`;
+        photoList.appendChild(li);
+      });
+
+      const usedHeight = placements.reduce((m, p) => Math.max(m, p.yMm + p.heightMm), 0);
+      const util = maxHeight.value > 0 ? Math.min(100, (usedHeight / Number(maxHeight.value)) * 100) : 0;
+      jobStats.textContent = `${photos.length} Motive, ${placements.length} platziert, genutzte Hoehe: ${usedHeight.toFixed(1)} mm (${util.toFixed(1)} %)`;
+    }
+
+    function runDummy() {
+      placements = simpleNest(photos, Number(rollWidth.value), Number(maxHeight.value), Number(spacing.value));
+      renderList();
+      draw();
+    }
+
+    generateBtn.addEventListener('click', () => {
+      photos = makeDummyPhotos(Number(sampleCount.value));
+      runDummy();
+    });
+
+    nestBtn.addEventListener('click', runDummy);
+
+    clearBtn.addEventListener('click', () => {
+      photos = [];
+      placements = [];
+      photoList.innerHTML = '';
+      jobStats.textContent = 'Noch keine Motive geladen.';
+      preview.innerHTML = '';
+    });
+
+    [rollWidth, maxHeight, spacing].forEach((el) => {
+      el.addEventListener('change', () => {
+        if (photos.length > 0) runDummy();
+      });
+    });
+
+    photos = makeDummyPhotos(8);
+    runDummy();
+  </script>
+</body>
+</html>

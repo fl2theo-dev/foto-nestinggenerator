@@ -1,0 +1,13 @@
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Build artifacts
+dist/
+build/
+
+# Temp
+*.tmp
+*.swp
