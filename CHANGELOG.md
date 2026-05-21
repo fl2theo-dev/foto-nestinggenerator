@@ -2,6 +2,14 @@
 
 Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 
+## [0.1.1] - 2026-05-21
+
+### Added
+
+- Automatische Versionierungsdarstellung in `docs/index.html` eingebaut.
+- Neue Datenquelle `docs/versions.json` fuer den Release-Verlauf angelegt.
+- Fallback-Rendering fuer lokale/offline Nutzung (z. B. `file://`) integriert.
+
 ## [0.1.0] - 2026-05-21
 
 ### Added

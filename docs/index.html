@@ -295,6 +295,41 @@
     .dot.cut { background: transparent; border: 2px solid #1f2421; }
     .dot.reg { background: #1f2421; }
 
+    .version-status {
+      font-size: 0.9rem;
+      color: var(--muted);
+      margin: 6px 0 0;
+    }
+
+    .version-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .version-item {
+      border: 1px solid #d7cfbf;
+      border-radius: 12px;
+      background: #fffaf0;
+      padding: 12px;
+    }
+
+    .version-item h4 {
+      margin: 0 0 6px;
+      font-size: 1rem;
+      color: #15453d;
+    }
+
+    .version-item p {
+      margin: 6px 0;
+      font-size: 0.9rem;
+      color: #42514b;
+    }
+
+    .version-item ul {
+      margin-top: 8px;
+      padding-left: 18px;
+    }
+
     @media (max-width: 980px) {
       .grid-3 {
         grid-template-columns: 1fr;
@@ -441,20 +476,15 @@
           Dieser Bereich dokumentiert nachvollziehbar, welche Aenderungen am Projekt vorgenommen
           wurden. Die Quelle der Wahrheit ist Git plus diese human-lesbare Zusammenfassung.
         </p>
-        <span class="pill">SemVer: 0.1.0</span>
-        <span class="pill">Stand: 21. Mai 2026</span>
+        <span class="pill" id="currentVersion">SemVer: wird geladen</span>
+        <span class="pill" id="currentDate">Stand: wird geladen</span>
+        <p class="version-status" id="versionStatus">Versionen werden geladen ...</p>
       </article>
 
       <section class="grid-2">
         <article class="card">
-          <h3>Letzte Aenderungen</h3>
-          <ol>
-            <li>Projektordner foto-nestinggenerator angelegt.</li>
-            <li>Konzept als gestaltete HTML-Seite strukturiert.</li>
-            <li>Interaktiver UI-Dummy (Nesting-Vorschau) integriert.</li>
-            <li>Versionierungsbereich in der Konzept-HTML eingefuehrt.</li>
-            <li>Git-Basis fuer weitere Entwicklung vorbereitet.</li>
-          </ol>
+          <h3>Release-Verlauf</h3>
+          <div class="version-list" id="versionList"></div>
         </article>
 
         <article class="card">
@@ -561,6 +591,10 @@
     const photoList = document.getElementById('photoList');
     const jobStats = document.getElementById('jobStats');
     const preview = document.getElementById('preview');
+    const currentVersion = document.getElementById('currentVersion');
+    const currentDate = document.getElementById('currentDate');
+    const versionStatus = document.getElementById('versionStatus');
+    const versionList = document.getElementById('versionList');
 
     const generateBtn = document.getElementById('generateBtn');
     const nestBtn = document.getElementById('nestBtn');
@@ -568,6 +602,80 @@
 
     let photos = [];
     let placements = [];
+
+    const fallbackVersionData = {
+      releases: [
+        {
+          version: '0.1.1',
+          date: '2026-05-21',
+          summary: 'Automatische Versionierung in der Konzept-HTML eingefuehrt.',
+          changes: [
+            'Release-Verlauf wird nun aus docs/versions.json geladen.',
+            'Dynamische Anzeige von Version, Stand und Aenderungen in der Versionierungsansicht.',
+            'Fallback-Daten fuer Offline- oder file://-Aufruf eingebaut.'
+          ]
+        },
+        {
+          version: '0.1.0',
+          date: '2026-05-21',
+          summary: 'Initiale Projektbasis erstellt.',
+          changes: [
+            'Projektordner foto-nestinggenerator angelegt.',
+            'Konzeptseite als formatierte HTML aufgebaut.',
+            'Interaktiver UI-Dummy fuer Nesting-Vorschau integriert.',
+            'Git-Repository initialisiert und nach GitHub gepusht.'
+          ]
+        }
+      ]
+    };
+
+    function renderVersionData(data, sourceLabel) {
+      const releases = Array.isArray(data?.releases) ? data.releases : [];
+
+      if (releases.length === 0) {
+        currentVersion.textContent = 'SemVer: keine Daten';
+        currentDate.textContent = 'Stand: keine Daten';
+        versionStatus.textContent = 'Keine Versionseintraege vorhanden.';
+        versionList.innerHTML = '';
+        return;
+      }
+
+      const latest = releases[0];
+      currentVersion.textContent = `SemVer: ${latest.version}`;
+      currentDate.textContent = `Stand: ${latest.date}`;
+      versionStatus.textContent = `Quelle: ${sourceLabel}`;
+
+      versionList.innerHTML = '';
+      releases.forEach((release) => {
+        const box = document.createElement('article');
+        box.className = 'version-item';
+
+        const list = Array.isArray(release.changes)
+          ? release.changes.map((c) => `<li>${c}</li>`).join('')
+          : '';
+
+        box.innerHTML = `
+          <h4>v${release.version} <span style="font-weight:500;color:#5f6d67">(${release.date})</span></h4>
+          <p>${release.summary || ''}</p>
+          <ul>${list}</ul>
+        `;
+
+        versionList.appendChild(box);
+      });
+    }
+
+    async function loadVersionData() {
+      try {
+        const response = await fetch('./versions.json', { cache: 'no-store' });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        renderVersionData(data, 'docs/versions.json');
+      } catch (error) {
+        renderVersionData(fallbackVersionData, 'integrierter Fallback (offline)');
+      }
+    }
 
     function rand(min, max) {
       return Math.round(min + Math.random() * (max - min));
@@ -752,6 +860,7 @@
       });
     });
 
+    loadVersionData();
     photos = makeDummyPhotos(8);
     runDummy();
   </script>

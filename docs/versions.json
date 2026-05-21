@@ -1,0 +1,25 @@
+{
+  "releases": [
+    {
+      "version": "0.1.1",
+      "date": "2026-05-21",
+      "summary": "Automatische Versionierung in der Konzept-HTML eingefuehrt.",
+      "changes": [
+        "Release-Verlauf wird aus docs/versions.json geladen.",
+        "Dynamische Anzeige von SemVer, Stand und Aenderungen in der Versionierungsansicht.",
+        "Fallback-Daten fuer Offline- oder file://-Aufruf eingebaut."
+      ]
+    },
+    {
+      "version": "0.1.0",
+      "date": "2026-05-21",
+      "summary": "Initiale Projektbasis erstellt.",
+      "changes": [
+        "Projektordner foto-nestinggenerator angelegt.",
+        "Konzeptseite als formatierte HTML aufgebaut.",
+        "Interaktiver UI-Dummy fuer Nesting-Vorschau integriert.",
+        "Git-Repository initialisiert und nach GitHub gepusht."
+      ]
+    }
+  ]
+}
