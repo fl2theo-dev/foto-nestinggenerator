@@ -2,6 +2,7 @@ const MM_PER_INCH = 25.4;
 const REGMARK_DIAMETER_MM = 5;
 const REGMARK_RADIUS_MM = REGMARK_DIAMETER_MM / 2;
 const REGMARK_OFFSET_MM = 3 + REGMARK_RADIUS_MM;
+const REGMARK_OUTER_PAD_MM = 3 + REGMARK_DIAMETER_MM;
 
 const photoInput = document.getElementById('photoInput');
 const rollWidthInput = document.getElementById('rollWidth');
@@ -66,63 +67,141 @@ function getRegmarks(item) {
   ];
 }
 
-function nestPhotos(photos, config) {
-  const sorted = [...photos].sort((a, b) => (b.widthMm * b.heightMm) - (a.widthMm * a.heightMm));
-  const placed = [];
-
-  let x = config.padding;
-  let y = config.padding;
-  let rowHeight = 0;
-
-  for (const photo of sorted) {
-    const variants = [{ width: photo.widthMm, height: photo.heightMm, rotated: false }];
-    if (config.allowRotate) {
-      variants.push({ width: photo.heightMm, height: photo.widthMm, rotated: true });
-    }
-
-    let bestVariant = null;
-
-    for (const variant of variants) {
-      const needsNewRow = x + variant.width > config.rollWidth - config.padding;
-      const candidateX = needsNewRow ? config.padding : x;
-      const candidateY = needsNewRow ? (y + rowHeight + config.gap) : y;
-
-      if (candidateY + variant.height > config.maxHeight - config.padding) {
-        continue;
+function pruneContained(rects) {
+  const keep = new Array(rects.length).fill(true);
+  for (let i = 0; i < rects.length; i++) {
+    if (!keep[i]) continue;
+    for (let j = 0; j < rects.length; j++) {
+      if (i === j || !keep[j]) continue;
+      const a = rects[i];
+      const b = rects[j];
+      const contains =
+        b.x <= a.x + 1e-6 &&
+        b.y <= a.y + 1e-6 &&
+        b.x + b.width >= a.x + a.width - 1e-6 &&
+        b.y + b.height >= a.y + a.height - 1e-6;
+      if (contains) {
+        keep[i] = false;
+        break;
       }
-
-      bestVariant = {
-        ...variant,
-        xMm: candidateX,
-        yMm: candidateY,
-        needsNewRow
-      };
-      break;
     }
+  }
+  return rects.filter((_, index) => keep[index]);
+}
 
-    if (!bestVariant) {
+function splitFreeRects(freeRects, obstacle, gap) {
+  const ox1 = obstacle.x - gap;
+  const oy1 = obstacle.y - gap;
+  const ox2 = obstacle.x + obstacle.width + gap;
+  const oy2 = obstacle.y + obstacle.height + gap;
+  const result = [];
+
+  for (const rect of freeRects) {
+    const rx1 = rect.x;
+    const ry1 = rect.y;
+    const rx2 = rect.x + rect.width;
+    const ry2 = rect.y + rect.height;
+
+    const noOverlap = ox2 <= rx1 + 1e-6 || ox1 >= rx2 - 1e-6 || oy2 <= ry1 + 1e-6 || oy1 >= ry2 - 1e-6;
+    if (noOverlap) {
+      result.push(rect);
       continue;
     }
 
-    if (bestVariant.needsNewRow) {
-      x = config.padding;
-      y = y + rowHeight + config.gap;
-      rowHeight = 0;
-      bestVariant.xMm = x;
-      bestVariant.yMm = y;
+    if (ox1 > rx1 + 1e-6) {
+      result.push({ x: rx1, y: ry1, width: ox1 - rx1, height: rect.height });
+    }
+    if (ox2 < rx2 - 1e-6) {
+      result.push({ x: ox2, y: ry1, width: rx2 - ox2, height: rect.height });
+    }
+    if (oy1 > ry1 + 1e-6) {
+      result.push({ x: rx1, y: ry1, width: rect.width, height: oy1 - ry1 });
+    }
+    if (oy2 < ry2 - 1e-6) {
+      result.push({ x: rx1, y: oy2, width: rect.width, height: ry2 - oy2 });
+    }
+  }
+
+  return pruneContained(result).filter((r) => r.width > 1e-3 && r.height > 1e-3);
+}
+
+function nestPhotos(photos, config) {
+  const sorted = [...photos].sort((a, b) => (b.widthMm * b.heightMm) - (a.widthMm * a.heightMm));
+  const placed = [];
+  let freeRects = [
+    {
+      x: config.padding,
+      y: config.padding,
+      width: config.rollWidth - config.padding * 2,
+      height: config.maxHeight - config.padding * 2
+    }
+  ];
+
+  for (const photo of sorted) {
+    const baseVariants = [{ width: photo.widthMm, height: photo.heightMm, rotated: false }];
+    if (config.allowRotate) {
+      baseVariants.push({ width: photo.heightMm, height: photo.widthMm, rotated: true });
     }
 
-    placed.push({
-      ...photo,
-      xMm: bestVariant.xMm,
-      yMm: bestVariant.yMm,
-      widthMm: bestVariant.width,
-      heightMm: bestVariant.height,
-      rotated: bestVariant.rotated
+    const variants = baseVariants.map((variant) => {
+      return {
+        ...variant,
+        footprintWidth: variant.width + 2 * REGMARK_OUTER_PAD_MM,
+        footprintHeight: variant.height
+      };
     });
 
-    x = bestVariant.xMm + bestVariant.width + config.gap;
-    rowHeight = Math.max(rowHeight, bestVariant.height);
+    let best = null;
+
+    for (let i = 0; i < freeRects.length; i++) {
+      const rect = freeRects[i];
+      for (const variant of variants) {
+        if (variant.footprintWidth > rect.width + 1e-6 || variant.footprintHeight > rect.height + 1e-6) {
+          continue;
+        }
+
+        const shortSideFit = Math.min(rect.width - variant.footprintWidth, rect.height - variant.footprintHeight);
+        const longSideFit = Math.max(rect.width - variant.footprintWidth, rect.height - variant.footprintHeight);
+
+        if (
+          !best ||
+          shortSideFit < best.shortSideFit - 1e-9 ||
+          (Math.abs(shortSideFit - best.shortSideFit) < 1e-9 && longSideFit < best.longSideFit - 1e-9)
+        ) {
+          best = {
+            rectIndex: i,
+            footprintX: rect.x,
+            footprintY: rect.y,
+            shortSideFit,
+            longSideFit,
+            variant
+          };
+        }
+      }
+    }
+
+    if (!best) {
+      continue;
+    }
+
+    const place = {
+      ...photo,
+      xMm: best.footprintX + REGMARK_OUTER_PAD_MM,
+      yMm: best.footprintY,
+      widthMm: best.variant.width,
+      heightMm: best.variant.height,
+      rotated: best.variant.rotated
+    };
+
+    placed.push(place);
+
+    const obstacle = {
+      x: best.footprintX,
+      y: best.footprintY,
+      width: best.variant.footprintWidth,
+      height: best.variant.footprintHeight
+    };
+    freeRects = splitFreeRects(freeRects, obstacle, config.gap);
   }
 
   return placed;

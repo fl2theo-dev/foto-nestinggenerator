@@ -540,7 +540,7 @@
         <div class="grid-2">
           <div class="form-row">
             <label for="releaseVersionInput">Version</label>
-            <input id="releaseVersionInput" type="text" value="0.2.1" />
+            <input id="releaseVersionInput" type="text" value="0.2.2" />
           </div>
           <div class="form-row">
             <label for="releaseDateInput">Datum (YYYY-MM-DD)</label>
@@ -676,6 +676,16 @@ Neuer Eintragspunkt 3</textarea>
 
     const fallbackVersionData = {
       releases: [
+        {
+          version: '0.2.1',
+          date: '2026-05-21',
+          summary: 'Nesting-Engine auf MaxRects mit besserer Flaechenausnutzung umgestellt.',
+          changes: [
+            'Zeilenbasiertes MVP-Nesting durch Best-Short-Side-Fit MaxRects ersetzt.',
+            'Regmark-Ausdehnung wird als Footprint im Packing mitberuecksichtigt.',
+            'Freiflaechen-Splitting und Pruning fuer robustere Platzierung integriert.'
+          ]
+        },
         {
           version: '0.2.0',
           date: '2026-05-21',

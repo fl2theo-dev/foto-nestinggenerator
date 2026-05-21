@@ -2,6 +2,14 @@
 
 Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 
+## [0.2.1] - 2026-05-21
+
+### Changed
+
+- Nesting in `app/main.js` von einfacher Zeilenplatzierung auf MaxRects (BSSF) umgestellt.
+- Regmark-Footprint wird beim Packen als reale Flaechenreserve beruecksichtigt.
+- Freiflaechen-Splitting und Contained-Pruning fuer stabilere Layout-Ergebnisse ergaenzt.
+
 ## [0.2.0] - 2026-05-21
 
 ### Added
