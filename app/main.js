@@ -1,8 +1,36 @@
+// Regmark-Logik: 4 Regmarks pro Bogen (außen)
+function getSheetRegmarks(page, config, pageHeightMm = config.maxHeight) {
+  if (page.length === 0) return [];
+
+  const minX = Math.min(...page.map((item) => item.xMm));
+  const minY = Math.min(...page.map((item) => item.yMm));
+  const maxX = Math.max(...page.map((item) => item.xMm + item.widthMm));
+  const maxY = Math.max(...page.map((item) => item.yMm + item.heightMm));
+
+  // 3 mm Abstand von der Motivkante zur AUSSENkante des Regmarks.
+  const leftCx = minX - REGMARK_OFFSET_MM;
+  const rightCx = maxX + REGMARK_OFFSET_MM;
+  const topCy = minY - REGMARK_OFFSET_MM;
+  const bottomCy = maxY + REGMARK_OFFSET_MM;
+
+  const minCx = REGMARK_RADIUS_MM;
+  const maxCx = config.rollWidth - REGMARK_RADIUS_MM;
+  const minCy = REGMARK_RADIUS_MM;
+  const maxCy = pageHeightMm - REGMARK_RADIUS_MM;
+
+  const clamp = (value, lo, hi) => Math.min(Math.max(value, lo), hi);
+
+  return [
+    { cx: clamp(leftCx, minCx, maxCx), cy: clamp(topCy, minCy, maxCy), r: REGMARK_RADIUS_MM },
+    { cx: clamp(rightCx, minCx, maxCx), cy: clamp(topCy, minCy, maxCy), r: REGMARK_RADIUS_MM },
+    { cx: clamp(leftCx, minCx, maxCx), cy: clamp(bottomCy, minCy, maxCy), r: REGMARK_RADIUS_MM },
+    { cx: clamp(rightCx, minCx, maxCx), cy: clamp(bottomCy, minCy, maxCy), r: REGMARK_RADIUS_MM }
+  ];
+}
 const MM_PER_INCH = 25.4;
 const REGMARK_DIAMETER_MM = 5;
 const REGMARK_RADIUS_MM = REGMARK_DIAMETER_MM / 2;
 const REGMARK_OFFSET_MM = 3 + REGMARK_RADIUS_MM;
-const REGMARK_OUTER_PAD_MM = 3 + REGMARK_DIAMETER_MM;
 
 const photoInput = document.getElementById('photoInput');
 const rollWidthInput = document.getElementById('rollWidth');
@@ -31,6 +59,7 @@ const moveDownBtn = document.getElementById('moveDownBtn');
 const prevPageBtn = document.getElementById('prevPageBtn');
 const nextPageBtn = document.getElementById('nextPageBtn');
 const pageIndicator = document.getElementById('pageIndicator');
+const effectiveHeightInfo = document.getElementById('effectiveHeightInfo');
 
 const statusEl = document.getElementById('status');
 const tableBody = document.getElementById('photoTableBody');
@@ -41,7 +70,13 @@ const state = {
   photos: [],
   pages: [],
   selectedId: null,
-  currentPage: 0
+  currentPage: 0,
+  drag: {
+    active: false,
+    id: null,
+    offsetXmm: 0,
+    offsetYmm: 0
+  }
 };
 
 function setStatus(message) {
@@ -93,27 +128,27 @@ function applyConfig(config) {
   if (typeof config.moveStep === 'number') moveStepInput.value = String(config.moveStep);
 }
 
-function getRegmarks(item) {
-  const y1 = item.yMm + Math.min(18, Math.max(8, item.heightMm * 0.2));
-  const y2 = item.yMm + item.heightMm - Math.min(18, Math.max(8, item.heightMm * 0.2));
-  const leftX = item.xMm - REGMARK_OFFSET_MM;
-  const rightX = item.xMm + item.widthMm + REGMARK_OFFSET_MM;
-
-  return [
-    { cx: leftX, cy: y1, r: REGMARK_RADIUS_MM },
-    { cx: leftX, cy: y2, r: REGMARK_RADIUS_MM },
-    { cx: rightX, cy: y1, r: REGMARK_RADIUS_MM },
-    { cx: rightX, cy: y2, r: REGMARK_RADIUS_MM }
-  ];
-}
-
 function getFootprintRect(item) {
   return {
-    x: item.xMm - REGMARK_OUTER_PAD_MM,
+    x: item.xMm,
     y: item.yMm,
-    width: item.widthMm + 2 * REGMARK_OUTER_PAD_MM,
+    width: item.widthMm,
     height: item.heightMm
   };
+}
+
+function getRectBottomY(rect) {
+  return rect.y + rect.height;
+}
+
+function getPlacedUsedBottom(placed, config) {
+  return Math.max(config.padding, ...placed.map((p) => p.yMm + p.heightMm));
+}
+
+function getRotationPenalty(variant, strategy) {
+  if (strategy === 'prefer-upright') return variant.rotated ? 1 : 0;
+  if (strategy === 'prefer-rotated') return variant.rotated ? 0 : 1;
+  return 0;
 }
 
 function rectsOverlap(a, b, gap = 0) {
@@ -175,7 +210,7 @@ function splitFreeRects(freeRects, obstacle, gap) {
   return pruneContained(result).filter((r) => r.width > 1e-3 && r.height > 1e-3);
 }
 
-function nestSinglePage(photos, config) {
+function nestSinglePageWithStrategy(photos, config, strategy) {
   const sorted = [...photos].sort((a, b) => (b.originalWidthMm * b.originalHeightMm) - (a.originalWidthMm * a.originalHeightMm));
   const placed = [];
   const placedIds = new Set();
@@ -189,33 +224,57 @@ function nestSinglePage(photos, config) {
   ];
 
   for (const photo of sorted) {
-    const variants = [{ width: photo.originalWidthMm, height: photo.originalHeightMm, rotated: false }];
-    if (config.allowRotate) {
+    const variants = [];
+    if (strategy !== 'force-rotated') {
+      variants.push({ width: photo.originalWidthMm, height: photo.originalHeightMm, rotated: false });
+    }
+    if (config.allowRotate && strategy !== 'force-upright') {
       variants.push({ width: photo.originalHeightMm, height: photo.originalWidthMm, rotated: true });
     }
 
     let best = null;
     for (const rect of freeRects) {
       for (const variant of variants) {
-        const footprintWidth = variant.width + 2 * REGMARK_OUTER_PAD_MM;
+        const footprintWidth = variant.width;
         const footprintHeight = variant.height;
         if (footprintWidth > rect.width + 1e-6 || footprintHeight > rect.height + 1e-6) {
           continue;
         }
 
+        const placedRect = {
+          x: rect.x,
+          y: rect.y,
+          width: footprintWidth,
+          height: footprintHeight
+        };
+        const resultingUsedBottom = Math.max(
+          ...placed.map((p) => p.yMm + p.heightMm),
+          getRectBottomY(placedRect)
+        );
         const shortSideFit = Math.min(rect.width - footprintWidth, rect.height - footprintHeight);
         const longSideFit = Math.max(rect.width - footprintWidth, rect.height - footprintHeight);
+        const rotationPenalty = getRotationPenalty(variant, strategy);
+        const topY = rect.y;
+        const leftX = rect.x;
 
         if (
           !best ||
-          shortSideFit < best.shortSideFit - 1e-9 ||
-          (Math.abs(shortSideFit - best.shortSideFit) < 1e-9 && longSideFit < best.longSideFit - 1e-9)
+          resultingUsedBottom < best.resultingUsedBottom - 1e-9 ||
+          (Math.abs(resultingUsedBottom - best.resultingUsedBottom) < 1e-9 && rotationPenalty < best.rotationPenalty) ||
+          (Math.abs(resultingUsedBottom - best.resultingUsedBottom) < 1e-9 && rotationPenalty === best.rotationPenalty && topY < best.topY - 1e-9) ||
+          (Math.abs(resultingUsedBottom - best.resultingUsedBottom) < 1e-9 && rotationPenalty === best.rotationPenalty && Math.abs(topY - best.topY) < 1e-9 && shortSideFit < best.shortSideFit - 1e-9) ||
+          (Math.abs(resultingUsedBottom - best.resultingUsedBottom) < 1e-9 && rotationPenalty === best.rotationPenalty && Math.abs(topY - best.topY) < 1e-9 && Math.abs(shortSideFit - best.shortSideFit) < 1e-9 && longSideFit < best.longSideFit - 1e-9) ||
+          (Math.abs(resultingUsedBottom - best.resultingUsedBottom) < 1e-9 && rotationPenalty === best.rotationPenalty && Math.abs(topY - best.topY) < 1e-9 && Math.abs(shortSideFit - best.shortSideFit) < 1e-9 && Math.abs(longSideFit - best.longSideFit) < 1e-9 && leftX < best.leftX - 1e-9)
         ) {
           best = {
             rect,
             variant,
             footprintWidth,
             footprintHeight,
+            resultingUsedBottom,
+            rotationPenalty,
+            topY,
+            leftX,
             shortSideFit,
             longSideFit
           };
@@ -229,7 +288,7 @@ function nestSinglePage(photos, config) {
 
     placed.push({
       ...photo,
-      xMm: best.rect.x + REGMARK_OUTER_PAD_MM,
+      xMm: best.rect.x,
       yMm: best.rect.y,
       widthMm: best.variant.width,
       heightMm: best.variant.height,
@@ -255,20 +314,109 @@ function nestSinglePage(photos, config) {
   };
 }
 
-function nestAllPages(photos, config) {
+function comparePageResults(a, b, config) {
+  if (a.placed.length !== b.placed.length) {
+    return b.placed.length - a.placed.length;
+  }
+
+  const aBottom = getPlacedUsedBottom(a.placed, config);
+  const bBottom = getPlacedUsedBottom(b.placed, config);
+  if (Math.abs(aBottom - bBottom) > 1e-9) {
+    return aBottom - bBottom;
+  }
+
+  const aRotated = a.placed.reduce((sum, item) => sum + (item.rotated ? 1 : 0), 0);
+  const bRotated = b.placed.reduce((sum, item) => sum + (item.rotated ? 1 : 0), 0);
+  if (aRotated !== bRotated) {
+    return aRotated - bRotated;
+  }
+
+  const aLeftSum = a.placed.reduce((sum, item) => sum + item.xMm, 0);
+  const bLeftSum = b.placed.reduce((sum, item) => sum + item.xMm, 0);
+  if (Math.abs(aLeftSum - bLeftSum) > 1e-9) {
+    return aLeftSum - bLeftSum;
+  }
+
+  const aTopSum = a.placed.reduce((sum, item) => sum + item.yMm, 0);
+  const bTopSum = b.placed.reduce((sum, item) => sum + item.yMm, 0);
+  if (Math.abs(aTopSum - bTopSum) > 1e-9) {
+    return aTopSum - bTopSum;
+  }
+
+  return 0;
+}
+
+function nestSinglePage(photos, config) {
+  const strategies = ['prefer-upright', 'neutral'];
+  if (config.allowRotate) {
+    strategies.push('prefer-rotated');
+  }
+
+  const results = strategies.map((strategy) => nestSinglePageWithStrategy(photos, config, strategy));
+  results.sort((a, b) => comparePageResults(a, b, config));
+  return results[0];
+}
+
+function nestAllPagesForMode(photos, config, mode) {
   const pages = [];
   let remaining = [...photos];
   let guard = 0;
 
   while (remaining.length > 0 && guard < 300) {
     guard += 1;
-    const result = nestSinglePage(remaining, config);
+    const result = mode === 'mixed'
+      ? nestSinglePage(remaining, config)
+      : nestSinglePageWithStrategy(remaining, config, mode);
     if (result.placed.length === 0) break;
     pages.push(result.placed);
     remaining = result.remaining;
   }
 
-  return { pages, remaining };
+  const totalUsedHeight = pages.reduce((sum, page) => sum + getPageUsedHeightMm(page, config), 0);
+  const rotatedCount = pages.reduce(
+    (sum, page) => sum + page.reduce((inner, item) => inner + (item.rotated ? 1 : 0), 0),
+    0
+  );
+
+  return {
+    mode,
+    pages,
+    remaining,
+    totalUsedHeight,
+    rotatedCount
+  };
+}
+
+function compareJobResults(a, b) {
+  if (a.remaining.length !== b.remaining.length) {
+    return a.remaining.length - b.remaining.length;
+  }
+  if (a.pages.length !== b.pages.length) {
+    return a.pages.length - b.pages.length;
+  }
+  if (Math.abs(a.totalUsedHeight - b.totalUsedHeight) > 1e-9) {
+    return a.totalUsedHeight - b.totalUsedHeight;
+  }
+  if (a.rotatedCount !== b.rotatedCount) {
+    return a.rotatedCount - b.rotatedCount;
+  }
+  return 0;
+}
+
+function nestAllPages(photos, config) {
+  const modes = config.allowRotate
+    ? ['mixed', 'force-upright', 'force-rotated']
+    : ['force-upright'];
+
+  const candidates = modes.map((mode) => nestAllPagesForMode(photos, config, mode));
+  candidates.sort(compareJobResults);
+  const best = candidates[0];
+
+  return {
+    pages: best.pages,
+    remaining: best.remaining,
+    mode: best.mode
+  };
 }
 
 function getCurrentPagePlacements() {
@@ -305,11 +453,23 @@ function updatePageIndicator() {
   const total = state.pages.length;
   const current = total === 0 ? 0 : state.currentPage + 1;
   pageIndicator.textContent = `Seite ${current} / ${total}`;
+
+  if (!effectiveHeightInfo) return;
+  if (total === 0) {
+    effectiveHeightInfo.textContent = 'Effektive Seitenhoehe: -';
+    return;
+  }
+
+  const config = getConfig();
+  const page = getCurrentPagePlacements();
+  const effectiveHeight = getEffectivePageHeightMm(page, config);
+  effectiveHeightInfo.textContent = `Effektive Seitenhoehe: ${effectiveHeight.toFixed(1)} mm (Max: ${config.maxHeight.toFixed(1)} mm)`;
 }
 
 function drawPreview() {
   const config = getConfig();
   const page = getCurrentPagePlacements();
+  const effectivePageHeight = getEffectivePageHeightMm(page, config);
 
   ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
 
@@ -354,12 +514,6 @@ function drawPreview() {
       ctx.fillRect(x, y, w, h);
     }
 
-    ctx.strokeStyle = '#21302c';
-    ctx.lineWidth = 1.2;
-    ctx.setLineDash([5, 4]);
-    ctx.strokeRect(x, y, w, h);
-    ctx.setLineDash([]);
-
     if (item.id === state.selectedId) {
       ctx.strokeStyle = '#e07a1f';
       ctx.lineWidth = 2;
@@ -370,12 +524,27 @@ function drawPreview() {
     ctx.font = '12px Trebuchet MS';
     ctx.fillText(item.name, x + 6, y + 14);
 
-    ctx.fillStyle = '#111';
-    for (const reg of getRegmarks(item)) {
-      ctx.beginPath();
-      ctx.arc(mapX(reg.cx), mapY(reg.cy), reg.r * scale, 0, Math.PI * 2);
-      ctx.fill();
-    }
+  }
+
+  // Regmarks für den Bogen (außen)
+  ctx.fillStyle = '#111';
+  for (const reg of getSheetRegmarks(page, config, effectivePageHeight)) {
+    ctx.beginPath();
+    ctx.arc(mapX(reg.cx), mapY(reg.cy), reg.r * scale, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (page.length > 0) {
+    const cutY = mapY(effectivePageHeight);
+    ctx.save();
+    ctx.strokeStyle = '#b45622';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([7, 5]);
+    ctx.beginPath();
+    ctx.moveTo(mapX(0), cutY);
+    ctx.lineTo(mapX(config.rollWidth), cutY);
+    ctx.stroke();
+    ctx.restore();
   }
 
   updatePageIndicator();
@@ -421,10 +590,17 @@ function buildRotatedImageDataUrl(item) {
 }
 
 function getPageUsedHeightMm(page, config) {
-  return Math.max(
+  return Math.min(
+    config.maxHeight,
+    Math.max(
     config.padding,
     ...page.map((item) => item.yMm + item.heightMm + config.padding)
+    )
   );
+}
+
+function getEffectivePageHeightMm(page, config) {
+  return getPageUsedHeightMm(page, config);
 }
 
 function buildPdfDocument(includePhotos) {
@@ -440,16 +616,18 @@ function buildPdfDocument(includePhotos) {
 
   const config = getConfig();
   const { jsPDF } = window.jspdf;
-  const pageHeight = config.maxHeight;
+  const pageHeights = state.pages.map((page) => getEffectivePageHeightMm(page, config));
+  const firstPageHeight = pageHeights[0];
 
   const pdf = new jsPDF({
     unit: 'mm',
-    format: [config.rollWidth, pageHeight],
+    format: [config.rollWidth, firstPageHeight],
     compress: false,
     precision: 12
   });
 
   state.pages.forEach((page, index) => {
+    const pageHeight = pageHeights[index];
     if (index > 0) {
       pdf.addPage([config.rollWidth, pageHeight], 'portrait');
       pdf.setPage(index + 1);
@@ -465,20 +643,19 @@ function buildPdfDocument(includePhotos) {
         pdf.addImage(source, format, item.xMm, item.yMm, item.widthMm, item.heightMm, undefined, 'NONE');
       }
 
-      pdf.setDrawColor(0, 0, 0);
-      pdf.setLineWidth(0.2);
-      pdf.rect(item.xMm, item.yMm, item.widthMm, item.heightMm);
-
-      for (const reg of getRegmarks(item)) {
-        pdf.setFillColor(0, 0, 0);
-        pdf.circle(reg.cx, reg.cy, reg.r, 'F');
+      if (!includePhotos) {
+        pdf.setDrawColor(0, 0, 0);
+        pdf.setLineWidth(0.2);
+        pdf.rect(item.xMm, item.yMm, item.widthMm, item.heightMm);
       }
-    }
 
-    const usedHeight = getPageUsedHeightMm(page, config);
-    pdf.setDrawColor(220, 220, 220);
-    pdf.setLineWidth(0.1);
-    pdf.line(0, usedHeight, config.rollWidth, usedHeight);
+      // Regmarks werden jetzt pro Bogen gezeichnet (außen)
+    }
+    // Regmarks für den Bogen (außen)
+    for (const reg of getSheetRegmarks(page, config, pageHeight)) {
+      pdf.setFillColor(0, 0, 0);
+      pdf.circle(reg.cx, reg.cy, reg.r, 'F');
+    }
   });
 
   return pdf;
@@ -541,21 +718,38 @@ async function exportToHotfolder() {
 async function handlePhotoInput(files) {
   const dpi = Number(dpiInput.value) || 300;
   const loaded = [];
+  let skipped = 0;
 
   for (const file of files) {
-    const dataUrl = await fileToDataURL(file);
-    const image = await loadImage(dataUrl);
+    try {
+      const dataUrl = await fileToDataURL(file);
+      const image = await loadImage(dataUrl);
 
-    loaded.push({
-      id: crypto.randomUUID(),
-      name: file.name,
-      pixelWidth: image.naturalWidth,
-      pixelHeight: image.naturalHeight,
-      originalWidthMm: pxToMm(image.naturalWidth, dpi),
-      originalHeightMm: pxToMm(image.naturalHeight, dpi),
-      image,
-      dataUrl
-    });
+      loaded.push({
+        id: crypto.randomUUID(),
+        name: file.name,
+        pixelWidth: image.naturalWidth,
+        pixelHeight: image.naturalHeight,
+        originalWidthMm: pxToMm(image.naturalWidth, dpi),
+        originalHeightMm: pxToMm(image.naturalHeight, dpi),
+        image,
+        dataUrl
+      });
+    } catch {
+      skipped += 1;
+    }
+  }
+
+  if (loaded.length === 0) {
+    state.photos = [];
+    state.pages = [];
+    state.selectedId = null;
+    state.currentPage = 0;
+    selectedItemInput.value = 'Keins';
+    renderTable();
+    drawPreview();
+    setStatus('Keine lesbaren Bilddateien geladen. Bitte JPG/PNG/WebP pruefen.');
+    return;
   }
 
   state.photos = loaded;
@@ -565,7 +759,11 @@ async function handlePhotoInput(files) {
   selectedItemInput.value = 'Keins';
   renderTable();
   drawPreview();
-  setStatus(`${loaded.length} Fotos geladen. Starte nun das Nesting.`);
+  if (skipped > 0) {
+    setStatus(`${loaded.length} Fotos geladen, ${skipped} Datei(en) konnten nicht gelesen werden.`);
+  } else {
+    setStatus(`${loaded.length} Fotos geladen. Starte nun das Nesting.`);
+  }
 }
 
 function runNesting() {
@@ -580,7 +778,8 @@ function runNesting() {
   renderTable();
   drawPreview();
 
-  setStatus(`Nesting abgeschlossen: ${state.pages.length} Seiten, ${result.remaining.length} nicht platziert.`);
+  const modeLabel = result.mode || 'mixed';
+  setStatus(`Nesting abgeschlossen: ${state.pages.length} Seiten, ${result.remaining.length} nicht platziert (Modus: ${modeLabel}).`);
 }
 
 function getSelectedPlacement() {
@@ -776,6 +975,54 @@ function goToPage(index) {
   drawPreview();
 }
 
+function getCanvasTransform(config) {
+  const pad = 20;
+  const scale = Math.min(
+    (previewCanvas.width - pad * 2) / config.rollWidth,
+    (previewCanvas.height - pad * 2) / config.maxHeight
+  );
+  return { pad, scale };
+}
+
+function canvasEventToMm(event, config) {
+  const rect = previewCanvas.getBoundingClientRect();
+  const sx = previewCanvas.width / rect.width;
+  const sy = previewCanvas.height / rect.height;
+  const px = (event.clientX - rect.left) * sx;
+  const py = (event.clientY - rect.top) * sy;
+  const { pad, scale } = getCanvasTransform(config);
+  return {
+    px,
+    py,
+    xMm: (px - pad) / scale,
+    yMm: (py - pad) / scale,
+    pad,
+    scale
+  };
+}
+
+function findItemAtCanvasPoint(px, py, page, config) {
+  const { pad, scale } = getCanvasTransform(config);
+  for (let i = page.length - 1; i >= 0; i--) {
+    const item = page[i];
+    const x = pad + item.xMm * scale;
+    const y = pad + item.yMm * scale;
+    const w = item.widthMm * scale;
+    const h = item.heightMm * scale;
+    if (px >= x && px <= x + w && py >= y && py <= y + h) {
+      return item;
+    }
+  }
+  return null;
+}
+
+function stopDrag() {
+  state.drag.active = false;
+  state.drag.id = null;
+  state.drag.offsetXmm = 0;
+  state.drag.offsetYmm = 0;
+}
+
 photoInput.addEventListener('change', async (event) => {
   const files = Array.from(event.target.files || []);
   if (files.length === 0) return;
@@ -823,32 +1070,66 @@ previewCanvas.addEventListener('click', (event) => {
   }
 
   const config = getConfig();
-  const rect = previewCanvas.getBoundingClientRect();
-  const sx = previewCanvas.width / rect.width;
-  const sy = previewCanvas.height / rect.height;
-  const px = (event.clientX - rect.left) * sx;
-  const py = (event.clientY - rect.top) * sy;
-
-  const pad = 20;
-  const scale = Math.min(
-    (previewCanvas.width - pad * 2) / config.rollWidth,
-    (previewCanvas.height - pad * 2) / config.maxHeight
-  );
-
-  for (let i = page.length - 1; i >= 0; i--) {
-    const item = page[i];
-    const x = pad + item.xMm * scale;
-    const y = pad + item.yMm * scale;
-    const w = item.widthMm * scale;
-    const h = item.heightMm * scale;
-    if (px >= x && px <= x + w && py >= y && py <= y + h) {
-      selectPlacementById(item.id);
-      return;
-    }
+  const { px, py } = canvasEventToMm(event, config);
+  const item = findItemAtCanvasPoint(px, py, page, config);
+  if (item) {
+    selectPlacementById(item.id);
+    return;
   }
 
   selectPlacementById(null);
 });
+
+previewCanvas.addEventListener('mousedown', (event) => {
+  const page = getCurrentPagePlacements();
+  if (page.length === 0) return;
+
+  const config = getConfig();
+  const { px, py, xMm, yMm } = canvasEventToMm(event, config);
+  const item = findItemAtCanvasPoint(px, py, page, config);
+  if (!item) return;
+
+  selectPlacementById(item.id);
+  state.drag.active = true;
+  state.drag.id = item.id;
+  state.drag.offsetXmm = xMm - item.xMm;
+  state.drag.offsetYmm = yMm - item.yMm;
+});
+
+previewCanvas.addEventListener('mousemove', (event) => {
+  if (!state.drag.active || !state.drag.id) return;
+
+  const page = getCurrentPagePlacements();
+  const selected = page.find((item) => item.id === state.drag.id);
+  if (!selected) {
+    stopDrag();
+    return;
+  }
+
+  const config = getConfig();
+  const { xMm, yMm } = canvasEventToMm(event, config);
+  let nextX = xMm - state.drag.offsetXmm;
+  let nextY = yMm - state.drag.offsetYmm;
+
+  const minX = config.padding;
+  const maxX = config.rollWidth - config.padding - selected.widthMm;
+  const minY = config.padding;
+  const maxY = config.maxHeight - config.padding - selected.heightMm;
+  nextX = Math.min(Math.max(nextX, minX), maxX);
+  nextY = Math.min(Math.max(nextY, minY), maxY);
+
+  const candidate = { ...selected, xMm: nextX, yMm: nextY };
+  if (!canPlaceCandidate(candidate, page, config, selected.id)) {
+    return;
+  }
+
+  selected.xMm = nextX;
+  selected.yMm = nextY;
+  drawPreview();
+});
+
+previewCanvas.addEventListener('mouseup', stopDrag);
+previewCanvas.addEventListener('mouseleave', stopDrag);
 
 rotateBtn.addEventListener('click', rotateSelected);
 unplaceBtn.addEventListener('click', unplaceSelected);

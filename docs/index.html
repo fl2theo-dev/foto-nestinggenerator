@@ -389,13 +389,13 @@
       <article class="card">
         <h2>Projektziel</h2>
         <p>
-          Entwicklung einer Anwendung, die mehrere Fotos auf Rollenmaterial nestet, pro Motiv
-          vier Regmarks setzt und zwei synchronisierte Produktionsdateien erzeugt:
+          Entwicklung einer Anwendung, die mehrere Fotos auf Rollenmaterial nestet, pro Bogen
+          vier Regmarks setzt (bei Einzelmotiv um das Motiv) und zwei synchronisierte Produktionsdateien erzeugt:
           Druckdatei (Foto + Regmarks) und Konturdatei (Regmarks + Schneidekontur).
         </p>
         <span class="pill">Regmark-Durchmesser: 5 mm</span>
-        <span class="pill">Regmark-Abstand: 3 mm</span>
-        <span class="pill">Max. Hoehe Standard: 1200 mm</span>
+        <span class="pill">4 Regmarks pro Bogen</span>
+        <span class="pill">Max-Hoehe = Obergrenze, Cut auf Nutzhoehe</span>
       </article>
 
       <section class="grid-3">
@@ -404,7 +404,7 @@
           <ul>
             <li>Mehrere Fotos je Job laden.</li>
             <li>Rollenbreiten: 17, 24, 40 Zoll.</li>
-            <li>Nesting-Logik aus vorhandenem MaxRects-Ansatz uebernehmen.</li>
+            <li>Nesting mit globalem Strategievergleich fuer materialsparende Orientierung.</li>
             <li>Rotation 0/90 Grad konfigurierbar.</li>
           </ul>
         </article>
@@ -415,6 +415,7 @@
             <li>Datei A: Druckdaten mit Motiv und Regmarks.</li>
             <li>Datei B: Regmarks und Schneidekontur.</li>
             <li>Beide Dateien aus derselben Geometriequelle.</li>
+            <li>PDF-Seitenhoehe ist variabel und endet an der effektiven Nutzhoehe.</li>
             <li>Deckungsgleiche Koordinaten als Muss-Kriterium.</li>
           </ul>
         </article>
@@ -488,6 +489,8 @@
           Der bestehende MaxRects-Kern wird in ein separates Core-Modul ueberfuehrt. Die UI
           dient nur zur Parametrisierung und Vorschau. Export und Druckintegration greifen auf
           denselben Szenengraphen zu, um jeden Versatz zwischen Druck- und Konturdatei zu vermeiden.
+          Fuer robuste Flaechennutzung werden mehrere Nesting-Modi pro Job berechnet und das
+          insgesamt materialsparendste Ergebnis verwendet.
         </p>
       </article>
     </section>
@@ -676,6 +679,16 @@ Neuer Eintragspunkt 3</textarea>
 
     const fallbackVersionData = {
       releases: [
+        {
+          version: '0.3.1',
+          date: '2026-05-21',
+          summary: 'Nesting und Export auf materialsparende Gesamtoptimierung und effektive Cut-Hoehe erweitert.',
+          changes: [
+            'Globaler Strategievergleich (mixed, force-upright, force-rotated) waehlt den besten Gesamtjob statt nur seitenweise greedy.',
+            'PDF-Export nutzt pro Seite die effektive Nutzhoehe als finale Seitenhoehe (Max-Hoehe ist Obergrenze).',
+            'Vorschau zeigt zusaetzlich die effektive Seitenhoehe und die Cut-Linie fuer direkte Produktionskontrolle.'
+          ]
+        },
         {
           version: '0.3.0',
           date: '2026-05-21',
