@@ -1263,24 +1263,23 @@ function applyCropOverlay() {
     h: r.h / ih
   };
 
-  // Placement-Dimensionen so anpassen, dass kein Strecken entsteht.
+  // Placement-Dimensionen anpassen. Das SEITENVERHÄLTNIS des Ausschnitts hat
+  // immer Vorrang (kein Strecken). Zielgrösse bestimmt nur den Maßstab.
   // cropAspectWH = W/H des Ausschnitts auf dem Bogen (berücksichtigt Rotation).
   const cropAspectWH = getPlacementAspectRatio(selected);
   const targetW = Number(cropTargetWidthCm?.value || 0);
   const targetH = Number(cropTargetHeightCm?.value || 0);
 
-  if (targetW > 0 && targetH > 0) {
-    // Explizite Zielgrösse übernehmen
-    selected.widthMm = targetW * MM_PER_CM;
-    selected.heightMm = targetH * MM_PER_CM;
-  } else if (targetW > 0) {
+  if (targetW > 0) {
+    // Breite aus Zielfeld, Höhe immer aus Beschnitt-Verhältnis ableiten
     selected.widthMm = targetW * MM_PER_CM;
     selected.heightMm = selected.widthMm / Math.max(1e-6, cropAspectWH);
   } else if (targetH > 0) {
+    // Nur Höhe gesetzt, Breite ableiten
     selected.heightMm = targetH * MM_PER_CM;
     selected.widthMm = selected.heightMm * cropAspectWH;
   } else {
-    // Keine Zielgrösse: Breite beibehalten, Höhe aus Ausschnitt-Verhältnis ableiten
+    // Keine Zielgrösse: Breite beibehalten, Höhe aus Beschnitt-Verhältnis
     selected.heightMm = selected.widthMm / Math.max(1e-6, cropAspectWH);
   }
 
