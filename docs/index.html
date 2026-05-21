@@ -398,6 +398,7 @@
         <span class="pill">Max-Hoehe = Obergrenze, Cut auf Nutzhoehe</span>
         <span class="pill">Beschnitteditor mit greifbaren Ecken</span>
         <span class="pill">Drag-and-Drop vom Motivpool auf den Bogen</span>
+        <span class="pill">Ausschnitt und Druckgroesse entkoppelt</span>
       </article>
 
       <section class="grid-3">
@@ -411,6 +412,7 @@
             <li>Beschnittbereich interaktiv per Eck-Handles definieren und per Eingabefelder verfeinern.</li>
             <li>Motive koennen per Drag-and-Drop auf dem aktuellen Bogen platziert werden.</li>
             <li>Mehrfachauswahl in der Motivliste mit Checkboxen fuer Sammelaktionen.</li>
+            <li>Zielbreite/Zielhoehe steuern nur die Druckgroesse, nicht den Ausschnitt.</li>
           </ul>
         </article>
 
@@ -549,7 +551,7 @@
         <div class="grid-2">
           <div class="form-row">
             <label for="releaseVersionInput">Version</label>
-            <input id="releaseVersionInput" type="text" value="0.3.3" />
+            <input id="releaseVersionInput" type="text" value="0.3.4" />
           </div>
           <div class="form-row">
             <label for="releaseDateInput">Datum (YYYY-MM-DD)</label>
@@ -559,14 +561,14 @@
 
         <div class="form-row">
           <label for="releaseSummaryInput">Summary</label>
-          <input id="releaseSummaryInput" type="text" value="Motivlisten-Workflow mit Drag-and-Drop, Sammelauswahl und Bogen-Nesting erweitert." />
+          <input id="releaseSummaryInput" type="text" value="Beschnitt-Definition von Zielgroesse entkoppelt und Ratio-Verhalten korrigiert." />
         </div>
 
         <div class="form-row">
           <label for="releaseChangesInput">Aenderungen (eine Zeile pro Punkt)</label>
-            <textarea id="releaseChangesInput" rows="5">Motive lassen sich per Drag-and-Drop aus der Liste auf den aktuellen Druckbogen ziehen.
-        Checkbox-Auswahl in der Motivliste mit Aktionen "Auswahl platzieren" und "Auswahl loeschen".
-        Neuer Button "Bogen nesten" ordnet nur die bereits auf dem aktuellen Bogen liegenden Motive neu.</textarea>
+            <textarea id="releaseChangesInput" rows="5">Beschnittbereich definiert nur noch den Ausschnitt und veraendert beim Uebernehmen nicht mehr die Druckgroesse.
+        Zielbreite/Zielhoehe regeln ausschliesslich die Ausgabegroesse und damit die DPI-Bewertung.
+        Skalierungs-Ratio orientiert sich am echten Crop-Inhalt statt an der zuletzt gesetzten Objektgroesse.</textarea>
         </div>
 
         <div class="btn-row">
@@ -685,6 +687,16 @@
 
     const fallbackVersionData = {
       releases: [
+        {
+          version: '0.3.4',
+          date: '2026-05-21',
+          summary: 'Beschnitt-Definition von Zielgroesse entkoppelt und Ratio-Verhalten korrigiert.',
+          changes: [
+            'Der Beschnittbereich legt nur den Ausschnitt fest und veraendert beim Uebernehmen nicht mehr automatisch die Druckgroesse.',
+            'Zielbreite und Zielhoehe steuern ausschliesslich die Ausgabegroesse sowie die DPI-Anzeige.',
+            'Die Skalierungs-Ratio basiert nun auf dem tatsaechlichen Crop-Inhalt statt auf der zuletzt gesetzten Platzierungsgeometrie.'
+          ]
+        },
         {
           version: '0.3.3',
           date: '2026-05-21',

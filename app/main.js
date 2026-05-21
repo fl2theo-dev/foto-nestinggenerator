@@ -45,7 +45,10 @@ const moveStepInput = document.getElementById('moveStep');
 const selectedItemInput = document.getElementById('selectedItem');
 
 const nestBtn = document.getElementById('nestBtn');
+const nestPageBtn = document.getElementById('nestPageBtn');
 const clearBtn = document.getElementById('clearBtn');
+const placeSelectionBtn = document.getElementById('placeSelectionBtn');
+const deleteSelectionBtn = document.getElementById('deleteSelectionBtn');
 const saveProjectBtn = document.getElementById('saveProjectBtn');
 const loadProjectBtn = document.getElementById('loadProjectBtn');
 const projectLoadInput = document.getElementById('projectLoadInput');
@@ -116,6 +119,7 @@ const PHOTO_CARD_OVERSCAN = 6;
 const state = {
   photos: [],
   pages: [],
+  listSelection: new Set(),
   selectedId: null,
   currentPage: 0,
   drag: {
@@ -509,6 +513,191 @@ function getPhotoById(id) {
   return state.photos.find((photo) => photo.id === id) || null;
 }
 
+function cleanupEmptyPages() {
+  for (let i = state.pages.length - 1; i >= 0; i--) {
+    if (state.pages[i].length > 0) continue;
+    state.pages.splice(i, 1);
+    if (state.currentPage > i) {
+      state.currentPage -= 1;
+    }
+  }
+
+  if (state.pages.length === 0) {
+    state.currentPage = 0;
+    return;
+  }
+
+  state.currentPage = Math.min(Math.max(0, state.currentPage), state.pages.length - 1);
+}
+
+function findPlacementByIdGlobal(id) {
+  for (let pageIndex = 0; pageIndex < state.pages.length; pageIndex++) {
+    const itemIndex = state.pages[pageIndex].findIndex((item) => item.id === id);
+    if (itemIndex >= 0) {
+      return {
+        pageIndex,
+        itemIndex,
+        item: state.pages[pageIndex][itemIndex]
+      };
+    }
+  }
+  return null;
+}
+
+function removePlacementByIdGlobal(id) {
+  const found = findPlacementByIdGlobal(id);
+  if (!found) return null;
+  const [item] = state.pages[found.pageIndex].splice(found.itemIndex, 1);
+  cleanupEmptyPages();
+  return { ...found, item };
+}
+
+function ensureCurrentPage() {
+  if (state.pages.length === 0) {
+    state.pages = [[]];
+    state.currentPage = 0;
+  }
+  if (!state.pages[state.currentPage]) {
+    state.pages[state.currentPage] = [];
+  }
+}
+
+function updateSelectionActionButtons() {
+  const count = state.listSelection.size;
+  if (placeSelectionBtn) placeSelectionBtn.disabled = count === 0;
+  if (deleteSelectionBtn) deleteSelectionBtn.disabled = count === 0;
+}
+
+function getPlacementFromPhoto(photo) {
+  return {
+    ...photo,
+    xMm: 0,
+    yMm: 0,
+    widthMm: photo.originalWidthMm,
+    heightMm: photo.originalHeightMm,
+    rotated: false
+  };
+}
+
+function placePhotoOnCurrentPageAt(photoId, dropXmm, dropYmm) {
+  const photo = getPhotoById(photoId);
+  if (!photo) return false;
+
+  const removed = removePlacementByIdGlobal(photoId);
+  const base = removed?.item ? { ...removed.item } : getPlacementFromPhoto(photo);
+
+  ensureCurrentPage();
+  const page = getCurrentPagePlacements();
+  const config = getConfig();
+  const candidate = {
+    ...base,
+    xMm: dropXmm - base.widthMm / 2,
+    yMm: dropYmm - base.heightMm / 2
+  };
+
+  const snapped = findNearestFreePlacement(candidate, page, config, null, {
+    maxRadiusMm: Math.max(base.widthMm, base.heightMm) + 180,
+    angleSamples: 24,
+    stepMm: Math.max(1, Number(moveStepInput.value || 0) || 2)
+  });
+
+  if (!snapped) {
+    if (removed?.item) {
+      const restoreIndex = Math.min(Math.max(0, removed.pageIndex), state.pages.length);
+      if (!state.pages[restoreIndex]) {
+        state.pages.splice(restoreIndex, 0, []);
+      }
+      state.pages[restoreIndex].push(removed.item);
+      cleanupEmptyPages();
+    }
+    return false;
+  }
+
+  page.push({
+    ...base,
+    xMm: snapped.xMm,
+    yMm: snapped.yMm,
+    widthMm: snapped.widthMm,
+    heightMm: snapped.heightMm,
+    rotated: snapped.rotated
+  });
+
+  return true;
+}
+
+function nestCurrentPage() {
+  ensureCurrentPage();
+  const page = getCurrentPagePlacements();
+  if (page.length === 0) {
+    setStatus('Auf dem aktuellen Bogen sind keine Motive platziert.');
+    return;
+  }
+
+  const config = getConfig();
+  const result = nestSinglePage(page, config);
+  state.pages[state.currentPage] = result.placed;
+
+  if (result.remaining.length > 0) {
+    setStatus(`Bogen genestet: ${result.placed.length} platziert, ${result.remaining.length} passen nicht auf diesen Bogen.`);
+  } else {
+    setStatus(`Bogen genestet: ${result.placed.length} Motive sauber angeordnet.`);
+  }
+
+  renderTable();
+  drawPreview();
+}
+
+function placeListSelectionOnCurrentPage() {
+  const selectedIds = Array.from(state.listSelection);
+  if (selectedIds.length === 0) {
+    setStatus('Bitte zuerst Motive in der Liste auswaehlen.');
+    return;
+  }
+
+  ensureCurrentPage();
+  let placed = 0;
+  const page = getCurrentPagePlacements();
+  const startX = getConfig().padding + 30;
+  const startY = getConfig().padding + 30;
+
+  selectedIds.forEach((id, index) => {
+    const offset = index * 12;
+    if (placePhotoOnCurrentPageAt(id, startX + offset, startY + offset)) {
+      placed += 1;
+    }
+  });
+
+  nestCurrentPage();
+  if (placed < selectedIds.length) {
+    setStatus(`Auswahl teilweise platziert: ${placed}/${selectedIds.length}. Rest passt nicht auf den Bogen.`);
+  }
+}
+
+function deleteListSelection() {
+  const selectedIds = Array.from(state.listSelection);
+  if (selectedIds.length === 0) {
+    setStatus('Bitte zuerst Motive in der Liste auswaehlen.');
+    return;
+  }
+
+  const deleteSet = new Set(selectedIds);
+  state.photos = state.photos.filter((photo) => !deleteSet.has(photo.id));
+  state.pages = state.pages.map((page) => page.filter((item) => !deleteSet.has(item.id)));
+  cleanupEmptyPages();
+
+  if (state.selectedId && deleteSet.has(state.selectedId)) {
+    state.selectedId = null;
+    selectedItemInput.value = 'Keins';
+    hideManualMenu();
+  }
+
+  state.listSelection.clear();
+  updateSelectionActionButtons();
+  renderTable();
+  drawPreview();
+  setStatus(`${selectedIds.length} Motiv(e) aus der Auswahl geloescht.`);
+}
+
 function getCropNorm(item) {
   return item.cropNorm || { x: 0, y: 0, w: 1, h: 1 };
 }
@@ -530,6 +719,11 @@ function getPlacementPixelDims(item) {
     pxWidth: item.rotated ? crop.sh : crop.sw,
     pxHeight: item.rotated ? crop.sw : crop.sh
   };
+}
+
+function getPlacementAspectRatio(item) {
+  const dims = getPlacementPixelDims(item);
+  return dims.pxWidth / Math.max(1e-6, dims.pxHeight);
 }
 
 function updateManualScaleControlsForSelected() {
@@ -558,7 +752,7 @@ function updateManualScaleControlsForSelected() {
 function syncScaleInputsByRatio(changedAxis) {
   const selected = getSelectedPlacement();
   if (!selected) return;
-  const ratio = selected.widthMm / Math.max(1e-6, selected.heightMm);
+  const ratio = getPlacementAspectRatio(selected);
 
   const w = Number(menuScaleWidthCm?.value || 0);
   const h = Number(menuScaleHeightCm?.value || 0);
@@ -596,7 +790,7 @@ function applyScaleToSelected() {
     if (!targetHeightMm) targetHeightMm = dpiHeightMm;
   }
 
-  const ratio = selected.widthMm / Math.max(1e-6, selected.heightMm);
+  const ratio = getPlacementAspectRatio(selected);
   if (targetWidthMm && !targetHeightMm) {
     targetHeightMm = targetWidthMm / ratio;
   }
@@ -734,42 +928,33 @@ function getResizeAnchorForHandle(handle, rect) {
   return null;
 }
 
-function buildRectFromHandleDrag(handle, anchor, pointer, aspect, iw, ih) {
-  const minW = 8;
-  const maxWFromBounds = handle === 'nw' || handle === 'sw'
-    ? anchor.x
-    : iw - anchor.x;
-  const maxHFromBounds = handle === 'nw' || handle === 'ne'
-    ? anchor.y
-    : ih - anchor.y;
-
-  const rawW = Math.abs(pointer.x - anchor.x);
-  const rawH = Math.abs(pointer.y - anchor.y);
-
-  let w = Math.min(rawW, rawH * aspect);
-  let h = w / Math.max(1e-6, aspect);
-
-  w = Math.min(w, maxWFromBounds, maxHFromBounds * aspect);
-  h = w / Math.max(1e-6, aspect);
-
-  w = Math.max(minW, w);
-  h = Math.max(minW / Math.max(1e-6, aspect), h);
-
-  let x = anchor.x;
-  let y = anchor.y;
+function buildRectFromHandleDrag(handle, anchor, pointer, iw, ih) {
+  const minSize = 8;
+  let x = 0;
+  let y = 0;
+  let w = minSize;
+  let h = minSize;
 
   if (handle === 'nw') {
-    x = anchor.x - w;
-    y = anchor.y - h;
+    x = Math.min(pointer.x, anchor.x - minSize);
+    y = Math.min(pointer.y, anchor.y - minSize);
+    w = anchor.x - x;
+    h = anchor.y - y;
   } else if (handle === 'ne') {
     x = anchor.x;
-    y = anchor.y - h;
+    y = Math.min(pointer.y, anchor.y - minSize);
+    w = Math.max(minSize, pointer.x - anchor.x);
+    h = anchor.y - y;
   } else if (handle === 'se') {
     x = anchor.x;
     y = anchor.y;
+    w = Math.max(minSize, pointer.x - anchor.x);
+    h = Math.max(minSize, pointer.y - anchor.y);
   } else if (handle === 'sw') {
-    x = anchor.x - w;
+    x = Math.min(pointer.x, anchor.x - minSize);
     y = anchor.y;
+    w = anchor.x - x;
+    h = Math.max(minSize, pointer.y - anchor.y);
   }
 
   return clampCropRect({ x, y, w, h }, iw, ih);
@@ -801,13 +986,10 @@ function applyCropRectInputs(changedField) {
   let w = fromPercent(Number(cropRectWPercent?.value || toPercent(current.w, iw)), iw);
   let h = fromPercent(Number(cropRectHPercent?.value || toPercent(current.h, ih)), ih);
 
-  if (changedField === 'w') {
-    h = w / Math.max(1e-6, cropEditor.aspect);
-  } else if (changedField === 'h') {
-    w = h * cropEditor.aspect;
-  } else {
-    h = w / Math.max(1e-6, cropEditor.aspect);
-  }
+  if (changedField === 'x') x = Math.max(0, x);
+  if (changedField === 'y') y = Math.max(0, y);
+  if (changedField === 'w') w = Math.max(8, w);
+  if (changedField === 'h') h = Math.max(8, h);
 
   cropEditor.rect = clampCropRect({ x, y, w, h }, iw, ih);
   renderCropOverlay();
@@ -919,22 +1101,11 @@ function updateCropOverlayDpiInfo() {
 
 function updateCropAspectFromInputs() {
   if (!cropEditor.active) return;
-  const selected = getSelectedPlacement();
-  if (!selected) return;
-  const target = getCropTargetSizeMm();
-  if (!target) {
-    updateCropOverlayDpiInfo();
-    return;
-  }
 
-  const aspect = target.widthMm / Math.max(1e-6, target.heightMm);
-  cropEditor.aspect = aspect;
-  cropEditor.rect = clampCropRect(
-    fitRectToAspect(cropEditor.rect, aspect),
-    selected.image.naturalWidth,
-    selected.image.naturalHeight
-  );
-  renderCropOverlay();
+  // Zielgroesse dient nur der Druckgroesse/DPI-Anzeige und veraendert den Ausschnitt nicht.
+  if (menuScaleWidthCm && cropTargetWidthCm) menuScaleWidthCm.value = cropTargetWidthCm.value;
+  if (menuScaleHeightCm && cropTargetHeightCm) menuScaleHeightCm.value = cropTargetHeightCm.value;
+
   updateCropOverlayDpiInfo();
 }
 
@@ -947,17 +1118,15 @@ function openCropOverlayForSelected() {
 
   const tw = Number(menuScaleWidthCm?.value || 0) || (selected.widthMm / MM_PER_CM);
   const th = Number(menuScaleHeightCm?.value || 0) || (selected.heightMm / MM_PER_CM);
-  const targetAspect = tw > 0 && th > 0 ? tw / th : (selected.widthMm / Math.max(1e-6, selected.heightMm));
 
   if (cropTargetWidthCm) cropTargetWidthCm.value = tw.toFixed(1);
   if (cropTargetHeightCm) cropTargetHeightCm.value = th.toFixed(1);
 
   const cropPx = getCropPixels(selected);
-  let rect = fitRectToAspect({ x: cropPx.sx, y: cropPx.sy, w: cropPx.sw, h: cropPx.sh }, targetAspect);
-  rect = clampCropRect(rect, cropPx.iw, cropPx.ih);
+  const rect = clampCropRect({ x: cropPx.sx, y: cropPx.sy, w: cropPx.sw, h: cropPx.sh }, cropPx.iw, cropPx.ih);
 
   cropEditor.active = true;
-  cropEditor.aspect = targetAspect;
+  cropEditor.aspect = rect.w / Math.max(1e-6, rect.h);
   cropEditor.rect = rect;
   cropEditor.dragging = false;
   cropEditor.dragMode = null;
@@ -994,12 +1163,6 @@ function applyCropOverlay() {
     return;
   }
 
-  const target = getCropTargetSizeMm();
-  if (!target) {
-    setStatus('Bitte Zielbreite und Zielhoehe fuer den Beschnitt eingeben.');
-    return;
-  }
-
   const iw = selected.image.naturalWidth;
   const ih = selected.image.naturalHeight;
   const r = clampCropRect(cropEditor.rect, iw, ih);
@@ -1010,38 +1173,17 @@ function applyCropOverlay() {
     h: r.h / ih
   };
 
-  const page = getCurrentPagePlacements();
-  const config = getConfig();
-  const centerX = selected.xMm + selected.widthMm / 2;
-  const centerY = selected.yMm + selected.heightMm / 2;
-  const candidate = {
-    ...selected,
-    xMm: centerX - target.widthMm / 2,
-    yMm: centerY - target.heightMm / 2,
-    widthMm: target.widthMm,
-    heightMm: target.heightMm
-  };
-  const snapped = findNearestFreePlacement(candidate, page, config, selected.id, {
-    maxRadiusMm: Math.max(candidate.widthMm, candidate.heightMm) + 180,
-    angleSamples: 24
-  });
-  if (!snapped) {
-    setStatus('Beschnitt gesetzt, aber Zielgroesse passt nicht kollisionsfrei in den Bogen.');
-    return;
+  if (menuScaleWidthCm && cropTargetWidthCm && cropTargetWidthCm.value) {
+    menuScaleWidthCm.value = cropTargetWidthCm.value;
   }
-
-  selected.xMm = snapped.xMm;
-  selected.yMm = snapped.yMm;
-  selected.widthMm = snapped.widthMm;
-  selected.heightMm = snapped.heightMm;
-
-  if (menuScaleWidthCm) menuScaleWidthCm.value = (target.widthMm / MM_PER_CM).toFixed(1);
-  if (menuScaleHeightCm) menuScaleHeightCm.value = (target.heightMm / MM_PER_CM).toFixed(1);
+  if (menuScaleHeightCm && cropTargetHeightCm && cropTargetHeightCm.value) {
+    menuScaleHeightCm.value = cropTargetHeightCm.value;
+  }
 
   closeCropOverlay();
   updateManualScaleControlsForSelected();
   drawPreview();
-  setStatus('Beschnitt uebernommen.');
+  setStatus('Beschnitt uebernommen. Druckgroesse bleibt separat ueber Zielbreite/Zielhoehe steuerbar.');
 }
 
 function canPlaceCandidate(candidate, pagePlacements, config, ignoreId = null) {
@@ -1133,12 +1275,14 @@ function createPhotoCardElement(item, index) {
   const card = document.createElement('div');
   card.className = `photo-card${item.id === state.selectedId ? ' is-selected' : ''}`;
   card.dataset.photoId = item.id;
+  card.draggable = true;
   card.style.position = 'absolute';
   card.style.left = '0';
   card.style.right = '0';
   card.style.top = `${index * PHOTO_CARD_ROW_HEIGHT}px`;
 
   card.innerHTML = `
+    <input class="photo-card-select" type="checkbox" aria-label="${item.name} auswaehlen" ${item.isChecked ? 'checked' : ''} />
     <img class="photo-card-thumb" src="${item.thumbSrc}" alt="Vorschau ${item.name}" loading="lazy" decoding="async" />
     <div class="photo-card-lines">
       <div class="photo-line-1">${item.name}</div>
@@ -1147,9 +1291,30 @@ function createPhotoCardElement(item, index) {
     </div>
   `;
 
+  const checkbox = card.querySelector('.photo-card-select');
+  if (checkbox instanceof HTMLInputElement) {
+    checkbox.addEventListener('click', (event) => {
+      event.stopPropagation();
+    });
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) {
+        state.listSelection.add(item.id);
+      } else {
+        state.listSelection.delete(item.id);
+      }
+      updateSelectionActionButtons();
+    });
+  }
+
   card.addEventListener('click', () => {
     selectPlacementById(item.id);
     openPhotoOverlay(item);
+  });
+
+  card.addEventListener('dragstart', (event) => {
+    if (!event.dataTransfer) return;
+    event.dataTransfer.setData('text/photo-id', item.id);
+    event.dataTransfer.effectAllowed = 'move';
   });
 
   return card;
@@ -1279,15 +1444,23 @@ function drawPreview() {
 function renderTable() {
   ensureVirtualizedListInitialized();
   const placementMap = getPlacementMap();
+  const existingIds = new Set(state.photos.map((photo) => photo.id));
+  for (const id of Array.from(state.listSelection)) {
+    if (!existingIds.has(id)) {
+      state.listSelection.delete(id);
+    }
+  }
 
   virtualPhotoList.items = state.photos.map((photo) => ({
     ...photo,
     onPage: placementMap.get(photo.id) || null,
     widthCm: photo.originalWidthMm / 10,
     heightCm: photo.originalHeightMm / 10,
-    thumbSrc: photo.thumbnailDataUrl || photo.dataUrl
+    thumbSrc: photo.thumbnailDataUrl || photo.dataUrl,
+    isChecked: state.listSelection.has(photo.id)
   }));
 
+  updateSelectionActionButtons();
   renderVirtualizedPhotoCards();
 }
 
@@ -1529,6 +1702,7 @@ async function handlePhotoInput(files) {
   if (loaded.length === 0) {
     state.photos = [];
     state.pages = [];
+    state.listSelection.clear();
     state.selectedId = null;
     state.currentPage = 0;
     selectedItemInput.value = 'Keins';
@@ -1540,6 +1714,7 @@ async function handlePhotoInput(files) {
 
   state.photos = loaded;
   state.pages = [];
+  state.listSelection.clear();
   state.selectedId = null;
   state.currentPage = 0;
   selectedItemInput.value = 'Keins';
@@ -1558,6 +1733,7 @@ function runNesting() {
   const result = nestAllPages(state.photos, config);
 
   state.pages = result.pages;
+  state.listSelection.clear();
   state.currentPage = 0;
   state.selectedId = null;
   selectedItemInput.value = 'Keins';
@@ -1749,6 +1925,7 @@ async function loadProjectFromFile(file) {
 
   state.photos = photos;
   state.pages = pages;
+  state.listSelection.clear();
   state.currentPage = Math.min(Math.max(0, project.currentPage || 0), Math.max(0, pages.length - 1));
   state.selectedId = null;
   selectedItemInput.value = 'Keins';
@@ -1762,6 +1939,7 @@ async function loadProjectFromFile(file) {
 function clearAll() {
   state.photos = [];
   state.pages = [];
+  state.listSelection.clear();
   state.selectedId = null;
   state.currentPage = 0;
   selectedItemInput.value = 'Keins';
@@ -1894,6 +2072,18 @@ nestBtn.addEventListener('click', () => {
   runNesting();
 });
 
+if (nestPageBtn) {
+  nestPageBtn.addEventListener('click', () => nestCurrentPage());
+}
+
+if (placeSelectionBtn) {
+  placeSelectionBtn.addEventListener('click', () => placeListSelectionOnCurrentPage());
+}
+
+if (deleteSelectionBtn) {
+  deleteSelectionBtn.addEventListener('click', () => deleteListSelection());
+}
+
 clearBtn.addEventListener('click', clearAll);
 saveProjectBtn.addEventListener('click', saveProject);
 loadProjectBtn.addEventListener('click', () => projectLoadInput.click());
@@ -1996,6 +2186,38 @@ previewCanvas.addEventListener('mousemove', (event) => {
 
 previewCanvas.addEventListener('mouseup', stopDrag);
 previewCanvas.addEventListener('mouseleave', stopDrag);
+
+previewCanvas.addEventListener('dragover', (event) => {
+  const id = event.dataTransfer?.getData('text/photo-id');
+  if (!id) return;
+  event.preventDefault();
+  previewCanvas.classList.add('drop-active');
+});
+
+previewCanvas.addEventListener('dragleave', () => {
+  previewCanvas.classList.remove('drop-active');
+});
+
+previewCanvas.addEventListener('drop', (event) => {
+  const id = event.dataTransfer?.getData('text/photo-id');
+  previewCanvas.classList.remove('drop-active');
+  if (!id) return;
+  event.preventDefault();
+
+  const config = getConfig();
+  const { xMm, yMm } = canvasEventToMm(event, config);
+  const placed = placePhotoOnCurrentPageAt(id, xMm, yMm);
+  if (!placed) {
+    setStatus('Drop nicht moeglich: keine freie Position auf dem Bogen gefunden.');
+    return;
+  }
+
+  selectPlacementById(id);
+  renderTable();
+  drawPreview();
+  const photo = getPhotoById(id);
+  setStatus(`${photo?.name || 'Motiv'} auf dem Bogen platziert.`);
+});
 
 if (menuRotateBtn) {
   menuRotateBtn.addEventListener('click', () => rotateSelected());
@@ -2197,7 +2419,6 @@ if (cropOverlayCanvas) {
         cropEditor.activeHandle,
         cropEditor.resizeAnchor,
         pointerPx,
-        cropEditor.aspect,
         iw,
         ih
       );
@@ -2239,12 +2460,9 @@ if (cropOverlayCanvas) {
     const cx = r.x + r.w / 2;
     const cy = r.y + r.h / 2;
     let nw = Math.max(24, Math.min(selected.image.naturalWidth, r.w * factor));
-    let nh = nw / cropEditor.aspect;
-    if (nh > selected.image.naturalHeight) {
-      nh = selected.image.naturalHeight;
-      nw = nh * cropEditor.aspect;
-    }
+    let nh = Math.max(24, Math.min(selected.image.naturalHeight, r.h * factor));
     cropEditor.rect = clampCropRect({ x: cx - nw / 2, y: cy - nh / 2, w: nw, h: nh }, selected.image.naturalWidth, selected.image.naturalHeight);
+    cropEditor.aspect = cropEditor.rect.w / Math.max(1e-6, cropEditor.rect.h);
     renderCropOverlay();
     updateCropRectInputs();
     updateCropOverlayDpiInfo();

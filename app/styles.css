@@ -179,8 +179,21 @@ body {
   flex-direction: column;
 }
 
+.list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.list-actions {
+  margin-top: 0;
+}
+
 .panel h2 {
   margin-top: 0;
+  margin-bottom: 0;
 }
 
 label {
@@ -249,6 +262,11 @@ button.secondary {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: #fff;
+}
+
+.preview canvas.drop-active {
+  border-color: #0f6b5f;
+  box-shadow: 0 0 0 3px rgba(15, 107, 95, 0.25);
 }
 
 .preview-canvas-wrap {
@@ -363,7 +381,7 @@ td {
 
 .photo-card {
   display: grid;
-  grid-template-columns: 64px 1fr;
+  grid-template-columns: auto 64px 1fr;
   gap: 10px;
   align-items: center;
   padding: 8px;
@@ -371,6 +389,12 @@ td {
   border-radius: 10px;
   background: #fffdf8;
   cursor: pointer;
+}
+
+.photo-card-select {
+  width: 18px;
+  height: 18px;
+  margin: 0;
 }
 
 .photo-card.is-selected {
@@ -497,5 +521,10 @@ td {
 
   .panel {
     overflow: visible;
+  }
+
+  .list-head {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

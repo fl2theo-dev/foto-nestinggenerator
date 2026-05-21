@@ -60,6 +60,7 @@
 
       <div class="actions">
         <button id="nestBtn">Nesting starten</button>
+        <button id="nestPageBtn" class="secondary">Bogen nesten</button>
         <button id="clearBtn" class="secondary">Leeren</button>
       </div>
 
@@ -142,7 +143,13 @@
     </section>
 
     <section class="panel list">
-      <h2>Motive</h2>
+      <div class="list-head">
+        <h2>Motive</h2>
+        <div class="actions list-actions">
+          <button id="placeSelectionBtn" class="secondary">Auswahl platzieren</button>
+          <button id="deleteSelectionBtn" class="secondary">Auswahl loeschen</button>
+        </div>
+      </div>
       <div id="photoTableBody" class="photo-card-list"></div>
     </section>
   </main>
