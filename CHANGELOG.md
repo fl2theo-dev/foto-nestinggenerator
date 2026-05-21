@@ -2,6 +2,14 @@
 
 Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 
+## [0.1.3] - 2026-05-21
+
+### Added
+
+- Zweiter Button in der Versionierungsansicht, der einen CLI-Befehl erzeugt und kopiert.
+- Neues Script `scripts/add-release.js` fuer direktes Schreiben in `docs/versions.json`.
+- `package.json` mit `npm run release:add` fuer den lokalen Release-Workflow.
+
 ## [0.1.2] - 2026-05-21
 
 ### Added

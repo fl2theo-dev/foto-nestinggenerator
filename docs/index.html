@@ -540,7 +540,7 @@
         <div class="grid-2">
           <div class="form-row">
             <label for="releaseVersionInput">Version</label>
-            <input id="releaseVersionInput" type="text" value="0.1.2" />
+            <input id="releaseVersionInput" type="text" value="0.1.4" />
           </div>
           <div class="form-row">
             <label for="releaseDateInput">Datum (YYYY-MM-DD)</label>
@@ -563,9 +563,11 @@ Neuer Eintragspunkt 3</textarea>
         <div class="btn-row">
           <button class="btn primary" id="buildReleaseTemplateBtn">Template erzeugen</button>
           <button class="btn" id="copyReleaseTemplateBtn">Template kopieren</button>
+          <button class="btn" id="buildCliCommandBtn">CLI-Befehl kopieren</button>
         </div>
 
         <pre class="output-box" id="releaseTemplateOutput">Noch kein Template erzeugt.</pre>
+        <pre class="output-box" id="releaseCliOutput">Noch kein CLI-Befehl erzeugt.</pre>
       </article>
     </section>
 
@@ -661,7 +663,9 @@ Neuer Eintragspunkt 3</textarea>
     const releaseChangesInput = document.getElementById('releaseChangesInput');
     const buildReleaseTemplateBtn = document.getElementById('buildReleaseTemplateBtn');
     const copyReleaseTemplateBtn = document.getElementById('copyReleaseTemplateBtn');
+    const buildCliCommandBtn = document.getElementById('buildCliCommandBtn');
     const releaseTemplateOutput = document.getElementById('releaseTemplateOutput');
+    const releaseCliOutput = document.getElementById('releaseCliOutput');
 
     const generateBtn = document.getElementById('generateBtn');
     const nestBtn = document.getElementById('nestBtn');
@@ -672,6 +676,16 @@ Neuer Eintragspunkt 3</textarea>
 
     const fallbackVersionData = {
       releases: [
+        {
+          version: '0.1.3',
+          date: '2026-05-21',
+          summary: 'CLI-Workflow zum direkten Eintragen in docs/versions.json ergaenzt.',
+          changes: [
+            'Neuer Button erzeugt und kopiert den passenden Node-CLI-Befehl.',
+            'Release-Generator unterstuetzt nun Template plus direkte Eintragsautomatisierung.',
+            'Node-Script kann den Release-Block lokal direkt in versions.json schreiben.'
+          ]
+        },
         {
           version: '0.1.2',
           date: '2026-05-21',
@@ -775,6 +789,36 @@ Neuer Eintragspunkt 3</textarea>
       return json;
     }
 
+    function shellQuote(value) {
+      return `'${String(value).replace(/'/g, `'"'"'`)}'`;
+    }
+
+    function buildCliCommand() {
+      const version = (releaseVersionInput.value || '').trim() || '0.0.0';
+      const date = (releaseDateInput.value || '').trim() || 'YYYY-MM-DD';
+      const summary = (releaseSummaryInput.value || '').trim() || 'Kurzbeschreibung';
+      const changes = (releaseChangesInput.value || '')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+
+      const parts = [
+        'node scripts/add-release.js',
+        '--version', shellQuote(version),
+        '--date', shellQuote(date),
+        '--summary', shellQuote(summary)
+      ];
+
+      changes.forEach((change) => {
+        parts.push('--change');
+        parts.push(shellQuote(change));
+      });
+
+      const command = parts.join(' ');
+      releaseCliOutput.textContent = command;
+      return command;
+    }
+
     async function copyReleaseTemplate() {
       const json = buildReleaseTemplate();
       try {
@@ -786,6 +830,20 @@ Neuer Eintragspunkt 3</textarea>
 
       setTimeout(() => {
         copyReleaseTemplateBtn.textContent = 'Template kopieren';
+      }, 1200);
+    }
+
+    async function copyCliCommand() {
+      const command = buildCliCommand();
+      try {
+        await navigator.clipboard.writeText(command);
+        buildCliCommandBtn.textContent = 'CLI kopiert';
+      } catch (error) {
+        buildCliCommandBtn.textContent = 'Kopieren nicht moeglich';
+      }
+
+      setTimeout(() => {
+        buildCliCommandBtn.textContent = 'CLI-Befehl kopieren';
       }, 1200);
     }
 
@@ -974,9 +1032,11 @@ Neuer Eintragspunkt 3</textarea>
 
     buildReleaseTemplateBtn.addEventListener('click', buildReleaseTemplate);
     copyReleaseTemplateBtn.addEventListener('click', copyReleaseTemplate);
+    buildCliCommandBtn.addEventListener('click', copyCliCommand);
 
     loadVersionData();
     buildReleaseTemplate();
+    buildCliCommand();
     photos = makeDummyPhotos(8);
     runDummy();
   </script>
