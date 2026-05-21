@@ -1,6 +1,16 @@
 {
   "releases": [
     {
+      "version": "0.2.3",
+      "date": "2026-05-21",
+      "summary": "Lokaler High-Quality-PDF-Workflow mit ICC-Postprozess ergaenzt.",
+      "changes": [
+        "App nutzt jsPDF lokal aus node_modules statt CDN.",
+        "PDF-Export auf hohe Praezision und ohne Kompression geschaltet.",
+        "Neues Script scripts/make-pdfx.js zur lokalen ICC-basierten Konvertierung via Ghostscript."
+      ]
+    },
+    {
       "version": "0.2.2",
       "date": "2026-05-21",
       "summary": "Manuelle Nesting-Eingriffe und PDF-Export in der App umgesetzt.",

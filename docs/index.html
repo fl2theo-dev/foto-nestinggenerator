@@ -540,7 +540,7 @@
         <div class="grid-2">
           <div class="form-row">
             <label for="releaseVersionInput">Version</label>
-            <input id="releaseVersionInput" type="text" value="0.2.3" />
+            <input id="releaseVersionInput" type="text" value="0.2.4" />
           </div>
           <div class="form-row">
             <label for="releaseDateInput">Datum (YYYY-MM-DD)</label>
@@ -676,6 +676,16 @@ Neuer Eintragspunkt 3</textarea>
 
     const fallbackVersionData = {
       releases: [
+        {
+          version: '0.2.3',
+          date: '2026-05-21',
+          summary: 'Lokaler High-Quality-PDF-Workflow mit ICC-Postprozess ergaenzt.',
+          changes: [
+            'App nutzt jsPDF lokal aus node_modules statt CDN.',
+            'PDF-Export auf hohe Praezision und ohne Kompression geschaltet.',
+            'Neues Script scripts/make-pdfx.js zur lokalen ICC-basierten Konvertierung via Ghostscript.'
+          ]
+        },
         {
           version: '0.2.2',
           date: '2026-05-21',

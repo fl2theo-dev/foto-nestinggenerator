@@ -1,9 +1,13 @@
 {
   "name": "foto-nestinggenerator",
-  "version": "0.1.3",
+  "version": "0.2.3",
   "private": true,
   "description": "Projekt fuer Foto-Nesting mit Versionierungs-Workflow",
   "scripts": {
-    "release:add": "node scripts/add-release.js"
+    "release:add": "node scripts/add-release.js",
+    "pdfx:convert": "node scripts/make-pdfx.js"
+  },
+  "dependencies": {
+    "jspdf": "^2.5.1"
   }
 }

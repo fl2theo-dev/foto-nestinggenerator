@@ -2,6 +2,18 @@
 
 Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 
+## [0.2.3] - 2026-05-21
+
+### Added
+
+- Lokale jsPDF-Nutzung (ohne CDN) in der App.
+- Neues Script `scripts/make-pdfx.js` fuer ICC-basierten High-Quality-Postprozess via Ghostscript.
+- NPM-Skript `pdfx:convert` fuer reproduzierbaren lokalen Produktionsworkflow.
+
+### Changed
+
+- PDF-Export in `app/main.js` auf hohe Qualitaet (keine Kompression, hohe Praezision) angepasst.
+
 ## [0.2.2] - 2026-05-21
 
 ### Changed

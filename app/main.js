@@ -385,14 +385,19 @@ function exportPdf(includePhotos) {
   }
 
   if (!window.jspdf || !window.jspdf.jsPDF) {
-    setStatus('PDF-Bibliothek nicht geladen. Bitte Internetverbindung pruefen und erneut versuchen.');
+    setStatus('PDF-Bibliothek lokal nicht gefunden. Bitte im Projektordner einmal npm install ausfuehren.');
     return;
   }
 
   const { jsPDF } = window.jspdf;
   const rollWidth = Number(rollWidthInput.value);
   const pageHeight = Math.min(Number(maxHeightInput.value), Math.max(50, getUsedHeightMm()));
-  const pdf = new jsPDF({ unit: 'mm', format: [rollWidth, pageHeight] });
+  const pdf = new jsPDF({
+    unit: 'mm',
+    format: [rollWidth, pageHeight],
+    compress: false,
+    precision: 12
+  });
 
   pdf.setFillColor(255, 255, 255);
   pdf.rect(0, 0, rollWidth, pageHeight, 'F');
@@ -401,7 +406,7 @@ function exportPdf(includePhotos) {
     if (includePhotos && item.dataUrl) {
       const source = item.rotated ? buildRotatedImageDataUrl(item) : item.dataUrl;
       const format = getImageFormatFromDataUrl(source);
-      pdf.addImage(source, format, item.xMm, item.yMm, item.widthMm, item.heightMm);
+      pdf.addImage(source, format, item.xMm, item.yMm, item.widthMm, item.heightMm, undefined, 'NONE');
     }
 
     pdf.setDrawColor(0, 0, 0);
@@ -415,7 +420,11 @@ function exportPdf(includePhotos) {
   }
 
   pdf.save(includePhotos ? 'druck_motive_regmarks.pdf' : 'kontur_regmarks.pdf');
-  setStatus(includePhotos ? 'Druck-PDF exportiert.' : 'Kontur-PDF exportiert.');
+  if (includePhotos) {
+    setStatus('Druck-PDF exportiert. Fuer ICC/PDFX bitte danach scripts/make-pdfx.js nutzen.');
+  } else {
+    setStatus('Kontur-PDF exportiert.');
+  }
 }
 
 async function handlePhotoInput(files) {

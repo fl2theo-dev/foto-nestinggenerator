@@ -11,3 +11,6 @@ build/
 # Temp
 *.tmp
 *.swp
+
+# Node
+node_modules/
