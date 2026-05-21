@@ -2,6 +2,14 @@
 
 Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 
+## [0.1.2] - 2026-05-21
+
+### Added
+
+- Release-Template-Generator in der Versionierungsansicht von `docs/index.html` hinzugefuegt.
+- Eingabemaske fuer Version, Datum, Summary und Aenderungspunkte integriert.
+- JSON-Template-Ausgabe mit Copy-Button fuer schnelle Pflege von `docs/versions.json` umgesetzt.
+
 ## [0.1.1] - 2026-05-21
 
 ### Added

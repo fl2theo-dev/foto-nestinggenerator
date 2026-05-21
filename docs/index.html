@@ -189,12 +189,14 @@
     }
 
     input,
+    textarea,
     select,
     button {
       font: inherit;
     }
 
     input,
+    textarea,
     select {
       width: 100%;
       padding: 10px 11px;
@@ -328,6 +330,27 @@
     .version-item ul {
       margin-top: 8px;
       padding-left: 18px;
+    }
+
+    .release-generator {
+      display: grid;
+      gap: 10px;
+    }
+
+    .output-box {
+      width: 100%;
+      min-height: 170px;
+      border: 1px solid #c7bfad;
+      background: #fffaf0;
+      border-radius: 10px;
+      padding: 10px;
+      font-family: "Menlo", "Consolas", monospace;
+      font-size: 0.83rem;
+      line-height: 1.4;
+      color: #24312d;
+      white-space: pre;
+      overflow: auto;
+      margin: 0;
     }
 
     @media (max-width: 980px) {
@@ -507,6 +530,43 @@
           <li>Ab dann jede Iteration ueber Commits und optional Releases versionieren.</li>
         </ol>
       </article>
+
+      <article class="card release-generator">
+        <h3>Release-Template Generator</h3>
+        <p class="summary">
+          Erstellt ein JSON-Skelett fuer einen neuen Release-Eintrag in docs/versions.json.
+        </p>
+
+        <div class="grid-2">
+          <div class="form-row">
+            <label for="releaseVersionInput">Version</label>
+            <input id="releaseVersionInput" type="text" value="0.1.2" />
+          </div>
+          <div class="form-row">
+            <label for="releaseDateInput">Datum (YYYY-MM-DD)</label>
+            <input id="releaseDateInput" type="text" value="2026-05-21" />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label for="releaseSummaryInput">Summary</label>
+          <input id="releaseSummaryInput" type="text" value="Kurzbeschreibung des neuen Entwicklungsstands." />
+        </div>
+
+        <div class="form-row">
+          <label for="releaseChangesInput">Aenderungen (eine Zeile pro Punkt)</label>
+          <textarea id="releaseChangesInput" rows="5">Neuer Eintragspunkt 1
+Neuer Eintragspunkt 2
+Neuer Eintragspunkt 3</textarea>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn primary" id="buildReleaseTemplateBtn">Template erzeugen</button>
+          <button class="btn" id="copyReleaseTemplateBtn">Template kopieren</button>
+        </div>
+
+        <pre class="output-box" id="releaseTemplateOutput">Noch kein Template erzeugt.</pre>
+      </article>
     </section>
 
     <section class="pane" id="pane-dummy">
@@ -595,6 +655,13 @@
     const currentDate = document.getElementById('currentDate');
     const versionStatus = document.getElementById('versionStatus');
     const versionList = document.getElementById('versionList');
+    const releaseVersionInput = document.getElementById('releaseVersionInput');
+    const releaseDateInput = document.getElementById('releaseDateInput');
+    const releaseSummaryInput = document.getElementById('releaseSummaryInput');
+    const releaseChangesInput = document.getElementById('releaseChangesInput');
+    const buildReleaseTemplateBtn = document.getElementById('buildReleaseTemplateBtn');
+    const copyReleaseTemplateBtn = document.getElementById('copyReleaseTemplateBtn');
+    const releaseTemplateOutput = document.getElementById('releaseTemplateOutput');
 
     const generateBtn = document.getElementById('generateBtn');
     const nestBtn = document.getElementById('nestBtn');
@@ -605,6 +672,16 @@
 
     const fallbackVersionData = {
       releases: [
+        {
+          version: '0.1.2',
+          date: '2026-05-21',
+          summary: 'Release-Template-Generator in der Versionierungsansicht ergaenzt.',
+          changes: [
+            'Neues Formular fuer Version, Datum, Summary und Aenderungspunkte.',
+            'JSON-Skelett kann direkt erzeugt und kopiert werden.',
+            'Schnellere Pflege von docs/versions.json im Team-Workflow.'
+          ]
+        },
         {
           version: '0.1.1',
           date: '2026-05-21',
@@ -675,6 +752,41 @@
       } catch (error) {
         renderVersionData(fallbackVersionData, 'integrierter Fallback (offline)');
       }
+    }
+
+    function buildReleaseTemplate() {
+      const version = (releaseVersionInput.value || '').trim() || '0.0.0';
+      const date = (releaseDateInput.value || '').trim() || 'YYYY-MM-DD';
+      const summary = (releaseSummaryInput.value || '').trim() || 'Kurzbeschreibung';
+      const changes = (releaseChangesInput.value || '')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+
+      const templateObject = {
+        version,
+        date,
+        summary,
+        changes
+      };
+
+      const json = `${JSON.stringify(templateObject, null, 2)},`;
+      releaseTemplateOutput.textContent = json;
+      return json;
+    }
+
+    async function copyReleaseTemplate() {
+      const json = buildReleaseTemplate();
+      try {
+        await navigator.clipboard.writeText(json);
+        copyReleaseTemplateBtn.textContent = 'Kopiert';
+      } catch (error) {
+        copyReleaseTemplateBtn.textContent = 'Kopieren nicht moeglich';
+      }
+
+      setTimeout(() => {
+        copyReleaseTemplateBtn.textContent = 'Template kopieren';
+      }, 1200);
     }
 
     function rand(min, max) {
@@ -860,7 +972,11 @@
       });
     });
 
+    buildReleaseTemplateBtn.addEventListener('click', buildReleaseTemplate);
+    copyReleaseTemplateBtn.addEventListener('click', copyReleaseTemplate);
+
     loadVersionData();
+    buildReleaseTemplate();
     photos = makeDummyPhotos(8);
     runDummy();
   </script>
