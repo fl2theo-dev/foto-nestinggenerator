@@ -67,7 +67,9 @@ const pageIndicator = document.getElementById('pageIndicator');
 const effectiveHeightInfo = document.getElementById('effectiveHeightInfo');
 const manualNestingMenu = document.getElementById('manualNestingMenu');
 const menuRotateBtn = document.getElementById('menuRotateBtn');
+const menuDuplicateBtn = document.getElementById('menuDuplicateBtn');
 const menuUnplaceBtn = document.getElementById('menuUnplaceBtn');
+const duplicateBtn = document.getElementById('duplicateBtn');
 const menuUpBtn = document.getElementById('menuUpBtn');
 const menuLeftBtn = document.getElementById('menuLeftBtn');
 const menuRightBtn = document.getElementById('menuRightBtn');
@@ -1929,6 +1931,40 @@ function rotateSelected() {
   setStatus(`${selected.name} rotiert.`);
 }
 
+function duplicateSelected() {
+  const selected = getSelectedPlacement();
+  if (!selected) {
+    setStatus('Bitte zuerst ein Motiv in der Vorschau auswaehlen.');
+    return;
+  }
+
+  const page = getCurrentPagePlacements();
+  const config = getConfig();
+  const clone = {
+    ...selected,
+    id: crypto.randomUUID(),
+    xMm: selected.xMm + selected.widthMm + config.gap,
+    yMm: selected.yMm
+  };
+
+  const placed = findNearestFreePlacement(clone, page, config, null, {
+    maxRadiusMm: Math.max(clone.widthMm, clone.heightMm) + 300,
+    angleSamples: 24,
+    stepMm: 2
+  });
+
+  if (!placed) {
+    setStatus('Kein freier Platz fuer das Duplikat gefunden.');
+    return;
+  }
+
+  state.pages[state.currentPage].push(placed);
+  state.selectedId = placed.id;
+  drawPreview();
+  updateManualScaleControlsForSelected();
+  setStatus(`${selected.name} dupliziert.`);
+}
+
 function unplaceSelected() {
   const selected = getSelectedPlacement();
   if (!selected) {
@@ -2326,6 +2362,10 @@ if (menuRotateBtn) {
   menuRotateBtn.addEventListener('click', () => rotateSelected());
 }
 
+if (menuDuplicateBtn) {
+  menuDuplicateBtn.addEventListener('click', () => duplicateSelected());
+}
+
 if (menuUnplaceBtn) {
   menuUnplaceBtn.addEventListener('click', () => unplaceSelected());
 }
@@ -2633,6 +2673,7 @@ closePhotoOverlay();
 
 rotateBtn.addEventListener('click', rotateSelected);
 unplaceBtn.addEventListener('click', unplaceSelected);
+duplicateBtn.addEventListener('click', duplicateSelected);
 moveLeftBtn.addEventListener('click', () => moveSelected(-Number(moveStepInput.value || 0), 0));
 moveRightBtn.addEventListener('click', () => moveSelected(Number(moveStepInput.value || 0), 0));
 moveUpBtn.addEventListener('click', () => moveSelected(0, -Number(moveStepInput.value || 0)));
