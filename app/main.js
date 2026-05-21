@@ -11,11 +11,19 @@ const dpiInput = document.getElementById('dpi');
 const gapInput = document.getElementById('gap');
 const allowRotateInput = document.getElementById('allowRotate');
 const paddingInput = document.getElementById('padding');
+const moveStepInput = document.getElementById('moveStep');
+const selectedItemInput = document.getElementById('selectedItem');
 
 const nestBtn = document.getElementById('nestBtn');
 const clearBtn = document.getElementById('clearBtn');
-const exportPrintSvgBtn = document.getElementById('exportPrintSvgBtn');
-const exportContourSvgBtn = document.getElementById('exportContourSvgBtn');
+const exportPrintPdfBtn = document.getElementById('exportPrintPdfBtn');
+const exportContourPdfBtn = document.getElementById('exportContourPdfBtn');
+const rotateBtn = document.getElementById('rotateBtn');
+const unplaceBtn = document.getElementById('unplaceBtn');
+const moveLeftBtn = document.getElementById('moveLeftBtn');
+const moveRightBtn = document.getElementById('moveRightBtn');
+const moveUpBtn = document.getElementById('moveUpBtn');
+const moveDownBtn = document.getElementById('moveDownBtn');
 
 const statusEl = document.getElementById('status');
 const tableBody = document.getElementById('photoTableBody');
@@ -24,7 +32,8 @@ const ctx = previewCanvas.getContext('2d');
 
 const state = {
   photos: [],
-  placements: []
+  placements: [],
+  selectedId: null
 };
 
 function setStatus(message) {
@@ -65,6 +74,52 @@ function getRegmarks(item) {
     { cx: rightX, cy: y1, r: REGMARK_RADIUS_MM },
     { cx: rightX, cy: y2, r: REGMARK_RADIUS_MM }
   ];
+}
+
+function getFootprintRect(item) {
+  return {
+    x: item.xMm - REGMARK_OUTER_PAD_MM,
+    y: item.yMm,
+    width: item.widthMm + 2 * REGMARK_OUTER_PAD_MM,
+    height: item.heightMm
+  };
+}
+
+function rectsOverlap(a, b, gap = 0) {
+  return !(
+    a.x + a.width + gap <= b.x ||
+    b.x + b.width + gap <= a.x ||
+    a.y + a.height + gap <= b.y ||
+    b.y + b.height + gap <= a.y
+  );
+}
+
+function getConfig() {
+  return {
+    rollWidth: Number(rollWidthInput.value),
+    maxHeight: Number(maxHeightInput.value),
+    gap: Number(gapInput.value),
+    allowRotate: allowRotateInput.checked,
+    padding: Number(paddingInput.value)
+  };
+}
+
+function canPlaceCandidate(candidate, ignoreId = null) {
+  const config = getConfig();
+  const fp = getFootprintRect(candidate);
+
+  if (fp.x < config.padding - 1e-6) return false;
+  if (fp.y < config.padding - 1e-6) return false;
+  if (fp.x + fp.width > config.rollWidth - config.padding + 1e-6) return false;
+  if (fp.y + fp.height > config.maxHeight - config.padding + 1e-6) return false;
+
+  for (const other of state.placements) {
+    if (other.id === ignoreId) continue;
+    const otherFp = getFootprintRect(other);
+    if (rectsOverlap(fp, otherFp, config.gap)) return false;
+  }
+
+  return true;
 }
 
 function pruneContained(rects) {
@@ -237,7 +292,15 @@ function drawPreview() {
     const h = item.heightMm * scale;
 
     if (item.image) {
-      ctx.drawImage(item.image, x, y, w, h);
+      if (item.rotated) {
+        ctx.save();
+        ctx.translate(x + w, y);
+        ctx.rotate(Math.PI / 2);
+        ctx.drawImage(item.image, 0, 0, item.originalWidthMm * scale, item.originalHeightMm * scale);
+        ctx.restore();
+      } else {
+        ctx.drawImage(item.image, x, y, w, h);
+      }
     } else {
       ctx.fillStyle = '#9fd0c4';
       ctx.fillRect(x, y, w, h);
@@ -248,6 +311,12 @@ function drawPreview() {
     ctx.setLineDash([5, 4]);
     ctx.strokeRect(x, y, w, h);
     ctx.setLineDash([]);
+
+    if (item.id === state.selectedId) {
+      ctx.strokeStyle = '#e07a1f';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x - 2, y - 2, w + 4, h + 4);
+    }
 
     ctx.fillStyle = '#123f37';
     ctx.font = '12px Trebuchet MS';
@@ -279,43 +348,74 @@ function renderTable() {
   });
 }
 
-function downloadTextFile(filename, content, mimeType) {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
+function getImageFormatFromDataUrl(dataUrl) {
+  if (dataUrl.startsWith('data:image/png')) return 'PNG';
+  if (dataUrl.startsWith('data:image/webp')) return 'WEBP';
+  return 'JPEG';
 }
 
-function buildSvg(includePhotos) {
-  const rollWidth = Number(rollWidthInput.value);
-  const maxHeight = Number(maxHeightInput.value);
+function buildRotatedImageDataUrl(item) {
+  if (!item.dataUrl || !item.rotated) return item.dataUrl;
 
-  const parts = [];
-  parts.push(`<?xml version="1.0" encoding="UTF-8"?>`);
-  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${rollWidth}mm" height="${maxHeight}mm" viewBox="0 0 ${rollWidth} ${maxHeight}">`);
-  parts.push(`<rect x="0" y="0" width="${rollWidth}" height="${maxHeight}" fill="white" />`);
+  const cw = Math.max(1, Math.round(item.image.naturalHeight));
+  const ch = Math.max(1, Math.round(item.image.naturalWidth));
+  const off = document.createElement('canvas');
+  off.width = cw;
+  off.height = ch;
+  const c = off.getContext('2d');
+
+  c.translate(cw, 0);
+  c.rotate(Math.PI / 2);
+  c.drawImage(item.image, 0, 0);
+  return off.toDataURL('image/png');
+}
+
+function getUsedHeightMm() {
+  const padding = Number(paddingInput.value);
+  return Math.max(
+    padding,
+    ...state.placements.map((item) => item.yMm + item.heightMm + padding)
+  );
+}
+
+function exportPdf(includePhotos) {
+  if (state.placements.length === 0) {
+    setStatus('Kein Layout zum Exportieren vorhanden.');
+    return;
+  }
+
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    setStatus('PDF-Bibliothek nicht geladen. Bitte Internetverbindung pruefen und erneut versuchen.');
+    return;
+  }
+
+  const { jsPDF } = window.jspdf;
+  const rollWidth = Number(rollWidthInput.value);
+  const pageHeight = Math.min(Number(maxHeightInput.value), Math.max(50, getUsedHeightMm()));
+  const pdf = new jsPDF({ unit: 'mm', format: [rollWidth, pageHeight] });
+
+  pdf.setFillColor(255, 255, 255);
+  pdf.rect(0, 0, rollWidth, pageHeight, 'F');
 
   for (const item of state.placements) {
-    if (includePhotos) {
-      if (item.dataUrl) {
-        parts.push(`<image href="${item.dataUrl}" x="${item.xMm}" y="${item.yMm}" width="${item.widthMm}" height="${item.heightMm}" preserveAspectRatio="none" />`);
-      } else {
-        parts.push(`<rect x="${item.xMm}" y="${item.yMm}" width="${item.widthMm}" height="${item.heightMm}" fill="#9fd0c4" />`);
-      }
+    if (includePhotos && item.dataUrl) {
+      const source = item.rotated ? buildRotatedImageDataUrl(item) : item.dataUrl;
+      const format = getImageFormatFromDataUrl(source);
+      pdf.addImage(source, format, item.xMm, item.yMm, item.widthMm, item.heightMm);
     }
 
-    parts.push(`<rect x="${item.xMm}" y="${item.yMm}" width="${item.widthMm}" height="${item.heightMm}" fill="none" stroke="#111" stroke-width="0.2" />`);
+    pdf.setDrawColor(0, 0, 0);
+    pdf.setLineWidth(0.2);
+    pdf.rect(item.xMm, item.yMm, item.widthMm, item.heightMm);
 
     for (const reg of getRegmarks(item)) {
-      parts.push(`<circle cx="${reg.cx}" cy="${reg.cy}" r="${reg.r}" fill="#000" />`);
+      pdf.setFillColor(0, 0, 0);
+      pdf.circle(reg.cx, reg.cy, reg.r, 'F');
     }
   }
 
-  parts.push('</svg>');
-  return parts.join('\n');
+  pdf.save(includePhotos ? 'druck_motive_regmarks.pdf' : 'kontur_regmarks.pdf');
+  setStatus(includePhotos ? 'Druck-PDF exportiert.' : 'Kontur-PDF exportiert.');
 }
 
 async function handlePhotoInput(files) {
@@ -333,6 +433,8 @@ async function handlePhotoInput(files) {
       pixelHeight: image.naturalHeight,
       widthMm: pxToMm(image.naturalWidth, dpi),
       heightMm: pxToMm(image.naturalHeight, dpi),
+      originalWidthMm: pxToMm(image.naturalWidth, dpi),
+      originalHeightMm: pxToMm(image.naturalHeight, dpi),
       image,
       dataUrl
     });
@@ -340,26 +442,95 @@ async function handlePhotoInput(files) {
 
   state.photos = loaded;
   state.placements = [];
+  state.selectedId = null;
+  selectedItemInput.value = 'Keins';
   renderTable();
   drawPreview();
   setStatus(`${loaded.length} Fotos geladen. Starte nun das Nesting.`);
 }
 
 function runNesting() {
-  const config = {
-    rollWidth: Number(rollWidthInput.value),
-    maxHeight: Number(maxHeightInput.value),
-    gap: Number(gapInput.value),
-    allowRotate: allowRotateInput.checked,
-    padding: Number(paddingInput.value)
-  };
+  const config = getConfig();
 
   state.placements = nestPhotos(state.photos, config);
+  state.selectedId = null;
+  selectedItemInput.value = 'Keins';
   renderTable();
   drawPreview();
 
   const unplaced = state.photos.length - state.placements.length;
   setStatus(`Nesting abgeschlossen: ${state.placements.length} platziert, ${unplaced} nicht platziert.`);
+}
+
+function selectPlacementById(id) {
+  state.selectedId = id;
+  const item = state.placements.find((p) => p.id === id);
+  selectedItemInput.value = item ? item.name : 'Keins';
+  drawPreview();
+}
+
+function getSelectedPlacement() {
+  return state.placements.find((item) => item.id === state.selectedId) || null;
+}
+
+function moveSelected(dx, dy) {
+  const selected = getSelectedPlacement();
+  if (!selected) {
+    setStatus('Bitte zuerst ein Motiv in der Vorschau auswaehlen.');
+    return;
+  }
+
+  const candidate = { ...selected, xMm: selected.xMm + dx, yMm: selected.yMm + dy };
+  if (!canPlaceCandidate(candidate, selected.id)) {
+    setStatus('Verschieben nicht moeglich (Kollision oder ausserhalb des Bogens).');
+    return;
+  }
+
+  selected.xMm = candidate.xMm;
+  selected.yMm = candidate.yMm;
+  drawPreview();
+  setStatus(`${selected.name} verschoben.`);
+}
+
+function rotateSelected() {
+  const selected = getSelectedPlacement();
+  if (!selected) {
+    setStatus('Bitte zuerst ein Motiv in der Vorschau auswaehlen.');
+    return;
+  }
+
+  const candidate = {
+    ...selected,
+    widthMm: selected.heightMm,
+    heightMm: selected.widthMm,
+    rotated: !selected.rotated
+  };
+
+  if (!canPlaceCandidate(candidate, selected.id)) {
+    setStatus('Rotation nicht moeglich (Kollision oder ausserhalb des Bogens).');
+    return;
+  }
+
+  selected.widthMm = candidate.widthMm;
+  selected.heightMm = candidate.heightMm;
+  selected.rotated = candidate.rotated;
+  drawPreview();
+  setStatus(`${selected.name} rotiert.`);
+}
+
+function unplaceSelected() {
+  const selected = getSelectedPlacement();
+  if (!selected) {
+    setStatus('Bitte zuerst ein Motiv in der Vorschau auswaehlen.');
+    return;
+  }
+
+  state.placements = state.placements.filter((item) => item.id !== selected.id);
+  state.selectedId = null;
+  selectedItemInput.value = 'Keins';
+  renderTable();
+  drawPreview();
+  setStatus(`${selected.name} zurueck in die Liste gelegt.`);
 }
 
 photoInput.addEventListener('change', async (event) => {
@@ -384,30 +555,53 @@ nestBtn.addEventListener('click', () => {
 clearBtn.addEventListener('click', () => {
   state.photos = [];
   state.placements = [];
+  state.selectedId = null;
+  selectedItemInput.value = 'Keins';
   photoInput.value = '';
   renderTable();
   drawPreview();
   setStatus('Job geleert.');
 });
 
-exportPrintSvgBtn.addEventListener('click', () => {
-  if (state.placements.length === 0) {
-    setStatus('Kein Layout zum Exportieren vorhanden.');
-    return;
+exportPrintPdfBtn.addEventListener('click', () => exportPdf(true));
+exportContourPdfBtn.addEventListener('click', () => exportPdf(false));
+
+previewCanvas.addEventListener('click', (event) => {
+  const rect = previewCanvas.getBoundingClientRect();
+  const sx = previewCanvas.width / rect.width;
+  const sy = previewCanvas.height / rect.height;
+  const px = (event.clientX - rect.left) * sx;
+  const py = (event.clientY - rect.top) * sy;
+
+  const rollWidth = Number(rollWidthInput.value);
+  const maxHeight = Number(maxHeightInput.value);
+  const pad = 20;
+  const scale = Math.min(
+    (previewCanvas.width - pad * 2) / rollWidth,
+    (previewCanvas.height - pad * 2) / maxHeight
+  );
+
+  for (let i = state.placements.length - 1; i >= 0; i--) {
+    const item = state.placements[i];
+    const x = pad + item.xMm * scale;
+    const y = pad + item.yMm * scale;
+    const w = item.widthMm * scale;
+    const h = item.heightMm * scale;
+    if (px >= x && px <= x + w && py >= y && py <= y + h) {
+      selectPlacementById(item.id);
+      return;
+    }
   }
-  const svg = buildSvg(true);
-  downloadTextFile('druck_motive_regmarks.svg', svg, 'image/svg+xml');
-  setStatus('Druck-SVG exportiert.');
+
+  selectPlacementById(null);
 });
 
-exportContourSvgBtn.addEventListener('click', () => {
-  if (state.placements.length === 0) {
-    setStatus('Kein Layout zum Exportieren vorhanden.');
-    return;
-  }
-  const svg = buildSvg(false);
-  downloadTextFile('kontur_regmarks.svg', svg, 'image/svg+xml');
-  setStatus('Kontur-SVG exportiert.');
-});
+rotateBtn.addEventListener('click', rotateSelected);
+unplaceBtn.addEventListener('click', unplaceSelected);
+
+moveLeftBtn.addEventListener('click', () => moveSelected(-Number(moveStepInput.value || 0), 0));
+moveRightBtn.addEventListener('click', () => moveSelected(Number(moveStepInput.value || 0), 0));
+moveUpBtn.addEventListener('click', () => moveSelected(0, -Number(moveStepInput.value || 0)));
+moveDownBtn.addEventListener('click', () => moveSelected(0, Number(moveStepInput.value || 0)));
 
 drawPreview();

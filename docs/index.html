@@ -540,7 +540,7 @@
         <div class="grid-2">
           <div class="form-row">
             <label for="releaseVersionInput">Version</label>
-            <input id="releaseVersionInput" type="text" value="0.2.2" />
+            <input id="releaseVersionInput" type="text" value="0.2.3" />
           </div>
           <div class="form-row">
             <label for="releaseDateInput">Datum (YYYY-MM-DD)</label>
@@ -676,6 +676,16 @@ Neuer Eintragspunkt 3</textarea>
 
     const fallbackVersionData = {
       releases: [
+        {
+          version: '0.2.2',
+          date: '2026-05-21',
+          summary: 'Manuelle Nesting-Eingriffe und PDF-Export in der App umgesetzt.',
+          changes: [
+            'Verzerrungsfreie Bilddarstellung bei 90-Grad-Rotation in Vorschau und PDF-Export.',
+            'Exportpfad auf Druck-PDF und Kontur-PDF umgestellt (statt Druck-SVG).',
+            'Direkte Eingriffe ins Layout: Motiv auswaehlen, verschieben, rotieren, zurueck in die Liste legen.'
+          ]
+        },
         {
           version: '0.2.1',
           date: '2026-05-21',

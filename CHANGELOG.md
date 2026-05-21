@@ -2,6 +2,18 @@
 
 Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 
+## [0.2.2] - 2026-05-21
+
+### Changed
+
+- Bilddarstellung bei Rotation in `app/main.js` auf verzerrungsfreie Darstellung angepasst.
+- Export in der App auf `Druck-PDF` und `Kontur-PDF` umgestellt.
+
+### Added
+
+- Manuelle Eingriffe ins Nesting: Auswahl per Canvas-Klick, Verschieben, Rotation und Zurueck-in-Liste.
+- Kollisions- und Bounds-Checks fuer manuelle Bewegungen und Rotationen.
+
 ## [0.2.1] - 2026-05-21
 
 ### Changed

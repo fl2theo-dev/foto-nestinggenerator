@@ -65,8 +65,33 @@
 
       <h3>Export</h3>
       <div class="actions">
-        <button id="exportPrintSvgBtn">Export Druck-SVG</button>
-        <button id="exportContourSvgBtn">Export Kontur-SVG</button>
+        <button id="exportPrintPdfBtn">Export Druck-PDF</button>
+        <button id="exportContourPdfBtn">Export Kontur-PDF</button>
+      </div>
+
+      <h3>Manuelles Nesting</h3>
+      <p class="hint">Auswahl im Canvas per Klick auf Motiv.</p>
+      <div class="row">
+        <div>
+          <label for="moveStep">Verschiebe-Schritt (mm)</label>
+          <input id="moveStep" type="number" min="1" value="5" />
+        </div>
+        <div>
+          <label for="selectedItem">Ausgewaehltes Motiv</label>
+          <input id="selectedItem" type="text" value="Keins" readonly />
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="rotateBtn">Rotation 90 Grad</button>
+        <button id="unplaceBtn" class="secondary">Zurueck in Liste</button>
+      </div>
+
+      <div class="actions">
+        <button id="moveLeftBtn" class="secondary">Links</button>
+        <button id="moveRightBtn" class="secondary">Rechts</button>
+        <button id="moveUpBtn" class="secondary">Hoch</button>
+        <button id="moveDownBtn" class="secondary">Runter</button>
       </div>
 
       <p id="status" class="status">Keine Fotos geladen.</p>
@@ -95,5 +120,6 @@
   </main>
 
   <script type="module" src="./main.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 </body>
 </html>

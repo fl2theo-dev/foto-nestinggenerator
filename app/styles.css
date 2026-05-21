@@ -78,6 +78,11 @@ select {
   background: #fffdf9;
 }
 
+input[readonly] {
+  background: #f3efe5;
+  color: #3f4b45;
+}
+
 .row {
   display: grid;
   grid-template-columns: 1fr 1fr;
