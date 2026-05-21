@@ -397,6 +397,7 @@
         <span class="pill">4 Regmarks pro Bogen</span>
         <span class="pill">Max-Hoehe = Obergrenze, Cut auf Nutzhoehe</span>
         <span class="pill">Beschnitteditor mit greifbaren Ecken</span>
+        <span class="pill">Drag-and-Drop vom Motivpool auf den Bogen</span>
       </article>
 
       <section class="grid-3">
@@ -408,6 +409,8 @@
             <li>Nesting mit globalem Strategievergleich fuer materialsparende Orientierung.</li>
             <li>Rotation 0/90 Grad konfigurierbar.</li>
             <li>Beschnittbereich interaktiv per Eck-Handles definieren und per Eingabefelder verfeinern.</li>
+            <li>Motive koennen per Drag-and-Drop auf dem aktuellen Bogen platziert werden.</li>
+            <li>Mehrfachauswahl in der Motivliste mit Checkboxen fuer Sammelaktionen.</li>
           </ul>
         </article>
 
@@ -419,6 +422,7 @@
             <li>Beide Dateien aus derselben Geometriequelle.</li>
             <li>PDF-Seitenhoehe ist variabel und endet an der effektiven Nutzhoehe.</li>
             <li>Deckungsgleiche Koordinaten als Muss-Kriterium.</li>
+            <li>Bogen-spezifisches Nachordnen ueber separaten "Bogen nesten"-Schritt.</li>
           </ul>
         </article>
 
@@ -545,7 +549,7 @@
         <div class="grid-2">
           <div class="form-row">
             <label for="releaseVersionInput">Version</label>
-            <input id="releaseVersionInput" type="text" value="0.3.2" />
+            <input id="releaseVersionInput" type="text" value="0.3.3" />
           </div>
           <div class="form-row">
             <label for="releaseDateInput">Datum (YYYY-MM-DD)</label>
@@ -555,14 +559,14 @@
 
         <div class="form-row">
           <label for="releaseSummaryInput">Summary</label>
-          <input id="releaseSummaryInput" type="text" value="Beschnitt-Overlay mit greifbaren Ecken, Feintuning-Feldern und Live-DPI verbessert." />
+          <input id="releaseSummaryInput" type="text" value="Motivlisten-Workflow mit Drag-and-Drop, Sammelauswahl und Bogen-Nesting erweitert." />
         </div>
 
         <div class="form-row">
           <label for="releaseChangesInput">Aenderungen (eine Zeile pro Punkt)</label>
-          <textarea id="releaseChangesInput" rows="5">Beschnittbereich kann jetzt direkt ueber Eck-Handles gegriffen und skaliert werden.
-      Neue Eingabefelder fuer X/Y/Breite/Hoehe des Ausschnitts in Prozent zum Feintuning.
-      Live-DPI-Anzeige basiert auf Ausschnittpixeln und Zielgroesse.</textarea>
+            <textarea id="releaseChangesInput" rows="5">Motive lassen sich per Drag-and-Drop aus der Liste auf den aktuellen Druckbogen ziehen.
+        Checkbox-Auswahl in der Motivliste mit Aktionen "Auswahl platzieren" und "Auswahl loeschen".
+        Neuer Button "Bogen nesten" ordnet nur die bereits auf dem aktuellen Bogen liegenden Motive neu.</textarea>
         </div>
 
         <div class="btn-row">
@@ -681,6 +685,16 @@
 
     const fallbackVersionData = {
       releases: [
+        {
+          version: '0.3.3',
+          date: '2026-05-21',
+          summary: 'Motivlisten-Workflow mit Drag-and-Drop, Sammelauswahl und Bogen-Nesting erweitert.',
+          changes: [
+            'Motive koennen direkt aus der Liste per Drag-and-Drop auf den aktuellen Druckbogen gezogen werden.',
+            'Checkbox-Auswahl in der Motivliste ermoeglicht die Sammelaktionen Auswahl platzieren und Auswahl loeschen.',
+            'Neuer Bogen-nesten-Button ordnet die bereits platzierten Objekte des aktuellen Bogens sauber neu an.'
+          ]
+        },
         {
           version: '0.3.2',
           date: '2026-05-21',
