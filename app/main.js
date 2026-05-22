@@ -413,6 +413,139 @@ function extractExifColorSpaceFromJpegBytes(bytes) {
   return null;
 }
 
+function extractXmpIccProfileNameFromJpegBytes(bytes) {
+  if (!isJpegBytes(bytes)) return null;
+
+  const decodeCandidates = (payloadBytes) => {
+    const outputs = [];
+    const pushIfUseful = (text) => {
+      if (!text) return;
+      const compact = String(text).replace(/\u0000/g, '').trim();
+      if (!compact) return;
+      if (!outputs.includes(compact)) outputs.push(compact);
+    };
+
+    try {
+      pushIfUseful(new TextDecoder('utf-8', { fatal: false }).decode(payloadBytes));
+    } catch {}
+    try {
+      pushIfUseful(new TextDecoder('utf-16le', { fatal: false }).decode(payloadBytes));
+    } catch {}
+    try {
+      pushIfUseful(new TextDecoder('utf-16be', { fatal: false }).decode(payloadBytes));
+    } catch {}
+    try {
+      pushIfUseful(new TextDecoder('latin1', { fatal: false }).decode(payloadBytes));
+    } catch {}
+
+    return outputs;
+  };
+
+  const extractFromXmlText = (xml) => {
+    const patterns = [
+      /<photoshop:ICCProfile>([^<]+)<\/photoshop:ICCProfile>/i,
+      /photoshop:ICCProfile\s*=\s*['\"]([^'\"]+)['\"]/i,
+      /<[^>]*ICCProfile[^>]*>([^<]+)<\/[^>]+>/i,
+      /ICCProfile\s*=\s*['\"]([^'\"]+)['\"]/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = xml.match(pattern);
+      if (match && match[1]) {
+        const value = String(match[1]).replace(/\u0000/g, '').trim();
+        if (value) return value;
+      }
+    }
+
+    return null;
+  };
+
+  let offset = 2;
+  while (offset + 4 <= bytes.length) {
+    if (bytes[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+
+    const marker = bytes[offset + 1];
+    if (marker === 0xd9 || marker === 0xda) break;
+    if (marker === 0x00 || marker === 0xff) {
+      offset += 1;
+      continue;
+    }
+
+    const segmentLength = (bytes[offset + 2] << 8) | bytes[offset + 3];
+    if (segmentLength < 2) break;
+    const payloadStart = offset + 4;
+    const payloadEnd = offset + 2 + segmentLength;
+    if (payloadEnd > bytes.length) break;
+
+    if (marker === 0xe1 && payloadEnd - payloadStart >= 32) {
+      const xmpHeader = 'http://ns.adobe.com/xap/1.0/\u0000';
+      const xmpExtHeader = 'http://ns.adobe.com/xmp/extension/\u0000';
+      const headerBytes = new TextEncoder().encode(xmpHeader);
+      const extHeaderBytes = new TextEncoder().encode(xmpExtHeader);
+      const hasHeader = (hdr) => {
+        if (payloadStart + hdr.length > bytes.length) return false;
+        for (let i = 0; i < hdr.length; i += 1) {
+          if (bytes[payloadStart + i] !== hdr[i]) return false;
+        }
+        return true;
+      };
+
+      const isStdXmp = hasHeader(headerBytes);
+      const isExtXmp = hasHeader(extHeaderBytes);
+      const matchedHeaderBytes = isStdXmp ? headerBytes : (isExtXmp ? extHeaderBytes : null);
+
+      if (matchedHeaderBytes) {
+        const xmlBytes = bytes.slice(payloadStart + matchedHeaderBytes.length, payloadEnd);
+        const decodedTexts = decodeCandidates(xmlBytes);
+        for (const xml of decodedTexts) {
+          const extracted = extractFromXmlText(xml);
+          if (extracted) return extracted;
+        }
+      }
+
+      // Fallback: scan complete APP1 payload text for ICCProfile markers.
+      const payloadBytes = bytes.slice(payloadStart, payloadEnd);
+      const decodedPayloads = decodeCandidates(payloadBytes);
+      for (const text of decodedPayloads) {
+        const extracted = extractFromXmlText(text);
+        if (extracted) return extracted;
+      }
+    }
+
+    offset = payloadEnd;
+  }
+
+  return null;
+}
+
+async function resolveIccFromProfileName(profileName) {
+  const normalized = String(profileName || '').toLowerCase();
+  if (!normalized) return null;
+
+  if (normalized.includes('srgb')) {
+    const srgb = await loadFallbackSrgbIccBytes();
+    return {
+      iccProfileBytes: srgb,
+      colorProfileLabel: 'sRGB',
+      colorProfileSource: 'xmp-profile-name'
+    };
+  }
+
+  if (normalized.includes('adobe rgb') || normalized.includes('adobergb')) {
+    const adobe = await loadFallbackAdobeRgbIccBytes();
+    return {
+      iccProfileBytes: adobe,
+      colorProfileLabel: 'Adobe RGB',
+      colorProfileSource: 'xmp-profile-name'
+    };
+  }
+
+  return null;
+}
+
 function hasPngSrgbChunk(bytes) {
   if (!isPngBytes(bytes)) return false;
   let offset = 8;
@@ -573,6 +706,12 @@ async function resolveImportedProfileInfo(file, fileBytes) {
       };
     }
 
+    const xmpProfileName = extractXmpIccProfileNameFromJpegBytes(fileBytes);
+    const xmpProfileInfo = await resolveIccFromProfileName(xmpProfileName);
+    if (xmpProfileInfo) {
+      return xmpProfileInfo;
+    }
+
     const exifColorSpace = extractExifColorSpaceFromJpegBytes(fileBytes);
     if (exifColorSpace === 1) {
       const srgb = await loadFallbackSrgbIccBytes();
@@ -615,6 +754,14 @@ async function resolveProfileInfoFromDataUrl(dataUrl) {
       colorProfileLabel: detectProfileLabelFromIccBytes(icc),
       colorProfileSource: 'embedded-jpeg-icc'
     };
+  }
+
+  if (bytes && isJpegBytes(bytes)) {
+    const xmpProfileName = extractXmpIccProfileNameFromJpegBytes(bytes);
+    const xmpProfileInfo = await resolveIccFromProfileName(xmpProfileName);
+    if (xmpProfileInfo) {
+      return xmpProfileInfo;
+    }
   }
 
   if (bytes && isJpegBytes(bytes)) {
