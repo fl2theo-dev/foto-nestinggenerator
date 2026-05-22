@@ -1868,6 +1868,8 @@ function applyWhiteBorderToSelected() {
     : (menuWhiteBorderMode?.value === 'target' ? 'target' : 'outside');
   const targetWidthMm = Math.max(0, Number(menuTargetWidthCm?.value || 0) * MM_PER_CM);
   const targetHeightMm = Math.max(0, Number(menuTargetHeightCm?.value || 0) * MM_PER_CM);
+  const explicitContentWidthMm = Math.max(0, Number(menuScaleWidthCm?.value || 0) * MM_PER_CM);
+  const explicitContentHeightMm = Math.max(0, Number(menuScaleHeightCm?.value || 0) * MM_PER_CM);
 
   const hadStoredContent = Number(selected.contentWidthMm) > 0 && Number(selected.contentHeightMm) > 0;
   const baseContentWidth = hadStoredContent ? Number(selected.contentWidthMm) : Number(selected.widthMm);
@@ -1911,8 +1913,17 @@ function applyWhiteBorderToSelected() {
       return;
     }
 
-    const contentWidth = Math.max(1, baseContentWidth);
-    const contentHeight = Math.max(1, baseContentHeight);
+    let contentWidth = explicitContentWidthMm > 0 ? explicitContentWidthMm : Math.max(1, baseContentWidth);
+    let contentHeight = explicitContentHeightMm > 0 ? explicitContentHeightMm : Math.max(1, baseContentHeight);
+
+    if (explicitContentWidthMm > 0 && explicitContentHeightMm <= 0) {
+      const aspect = getPlacementAspectRatio(selected);
+      contentHeight = contentWidth / Math.max(1e-6, aspect);
+    } else if (explicitContentHeightMm > 0 && explicitContentWidthMm <= 0) {
+      const aspect = getPlacementAspectRatio(selected);
+      contentWidth = contentHeight * Math.max(1e-6, aspect);
+    }
+
     if (targetWidthMm + 1e-6 < contentWidth || targetHeightMm + 1e-6 < contentHeight) {
       Object.assign(selected, previous);
       if (photo) {
@@ -4116,7 +4127,9 @@ if (menuApplyBtn) {
     const savedTargetWidthCm = Number(menuTargetWidthCm?.value || 0);
     const savedTargetHeightCm = Number(menuTargetHeightCm?.value || 0);
     
-    applyScaleToSelected();
+    if (savedBorderMode !== 'target') {
+      applyScaleToSelected();
+    }
     
     // Restore white border values from before scale was applied
     if (menuWhiteBorderMm) menuWhiteBorderMm.value = savedBorderMm.toFixed(1);
