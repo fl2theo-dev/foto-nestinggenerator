@@ -5,6 +5,7 @@
   "private": true,
   "description": "Projekt fuer Foto-Nesting mit Versionierungs-Workflow",
   "scripts": {
+    "postinstall": "electron-builder install-app-deps",
     "desktop:dev": "electron .",
     "desktop:build": "electron-builder --mac --win --linux",
     "release:add": "node scripts/add-release.js",
@@ -27,7 +28,12 @@
       "node_modules/**/*",
       "package.json"
     ],
+    "asarUnpack": [
+      "node_modules/sharp/**/*",
+      "node_modules/@img/**/*"
+    ],
     "mac": {
+      "identity": null,
       "target": "dmg"
     },
     "win": {
