@@ -282,6 +282,137 @@ function readUint32BE(bytes, offset) {
   ) >>> 0;
 }
 
+function readUint16(bytes, offset, littleEndian) {
+  if (littleEndian) {
+    return bytes[offset] | (bytes[offset + 1] << 8);
+  }
+  return (bytes[offset] << 8) | bytes[offset + 1];
+}
+
+function readUint32(bytes, offset, littleEndian) {
+  if (littleEndian) {
+    return (
+      bytes[offset] |
+      (bytes[offset + 1] << 8) |
+      (bytes[offset + 2] << 16) |
+      (bytes[offset + 3] << 24)
+    ) >>> 0;
+  }
+  return (
+    (bytes[offset] << 24) |
+    (bytes[offset + 1] << 16) |
+    (bytes[offset + 2] << 8) |
+    bytes[offset + 3]
+  ) >>> 0;
+}
+
+function getExifTagValueShort(bytes, tiffStart, ifdOffset, targetTag, littleEndian) {
+  const ifdStart = tiffStart + ifdOffset;
+  if (ifdStart + 2 > bytes.length) return null;
+  const entryCount = readUint16(bytes, ifdStart, littleEndian);
+  let cursor = ifdStart + 2;
+
+  for (let i = 0; i < entryCount; i += 1) {
+    if (cursor + 12 > bytes.length) return null;
+    const tag = readUint16(bytes, cursor, littleEndian);
+    const type = readUint16(bytes, cursor + 2, littleEndian);
+    const count = readUint32(bytes, cursor + 4, littleEndian);
+    const valueOffset = cursor + 8;
+
+    if (tag === targetTag && type === 3 && count >= 1) {
+      return readUint16(bytes, valueOffset, littleEndian);
+    }
+
+    cursor += 12;
+  }
+
+  return null;
+}
+
+function getExifIfdOffset(bytes, tiffStart, ifdOffset, littleEndian) {
+  const ifdStart = tiffStart + ifdOffset;
+  if (ifdStart + 2 > bytes.length) return null;
+  const entryCount = readUint16(bytes, ifdStart, littleEndian);
+  let cursor = ifdStart + 2;
+
+  for (let i = 0; i < entryCount; i += 1) {
+    if (cursor + 12 > bytes.length) return null;
+    const tag = readUint16(bytes, cursor, littleEndian);
+    const type = readUint16(bytes, cursor + 2, littleEndian);
+    const count = readUint32(bytes, cursor + 4, littleEndian);
+    const valueOrOffset = readUint32(bytes, cursor + 8, littleEndian);
+
+    if (tag === 0x8769 && type === 4 && count >= 1) {
+      return valueOrOffset;
+    }
+
+    cursor += 12;
+  }
+
+  return null;
+}
+
+function extractExifColorSpaceFromJpegBytes(bytes) {
+  if (!isJpegBytes(bytes)) return null;
+
+  let offset = 2;
+  while (offset + 4 <= bytes.length) {
+    if (bytes[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+
+    const marker = bytes[offset + 1];
+    if (marker === 0xd9 || marker === 0xda) break;
+    if (marker === 0x00 || marker === 0xff) {
+      offset += 1;
+      continue;
+    }
+
+    const segmentLength = (bytes[offset + 2] << 8) | bytes[offset + 3];
+    if (segmentLength < 2) break;
+    const payloadStart = offset + 4;
+    const payloadEnd = offset + 2 + segmentLength;
+    if (payloadEnd > bytes.length) break;
+
+    if (marker === 0xe1 && payloadEnd - payloadStart >= 6) {
+      const exifHeader = String.fromCharCode(
+        bytes[payloadStart],
+        bytes[payloadStart + 1],
+        bytes[payloadStart + 2],
+        bytes[payloadStart + 3],
+        bytes[payloadStart + 4],
+        bytes[payloadStart + 5]
+      );
+
+      if (exifHeader === 'Exif\u0000\u0000') {
+        const tiffStart = payloadStart + 6;
+        if (tiffStart + 8 > bytes.length) return null;
+        const endianA = bytes[tiffStart];
+        const endianB = bytes[tiffStart + 1];
+        const littleEndian = endianA === 0x49 && endianB === 0x49;
+        const bigEndian = endianA === 0x4d && endianB === 0x4d;
+        if (!littleEndian && !bigEndian) return null;
+
+        const fixed = readUint16(bytes, tiffStart + 2, littleEndian);
+        if (fixed !== 0x002a) return null;
+
+        const ifd0Offset = readUint32(bytes, tiffStart + 4, littleEndian);
+        const exifIfdOffset = getExifIfdOffset(bytes, tiffStart, ifd0Offset, littleEndian);
+        if (!Number.isFinite(exifIfdOffset)) return null;
+
+        const colorSpace = getExifTagValueShort(bytes, tiffStart, exifIfdOffset, 0xa001, littleEndian);
+        if (Number.isFinite(colorSpace)) return colorSpace;
+        return null;
+      }
+    }
+
+    offset = payloadEnd;
+  }
+
+  return null;
+}
+
 function hasPngSrgbChunk(bytes) {
   if (!isPngBytes(bytes)) return false;
   let offset = 8;
@@ -441,6 +572,17 @@ async function resolveImportedProfileInfo(file, fileBytes) {
         colorProfileSource: 'embedded-jpeg-icc'
       };
     }
+
+    const exifColorSpace = extractExifColorSpaceFromJpegBytes(fileBytes);
+    if (exifColorSpace === 1) {
+      const srgb = await loadFallbackSrgbIccBytes();
+      return {
+        iccProfileBytes: srgb,
+        colorProfileLabel: 'sRGB',
+        colorProfileSource: 'jpeg-exif-srgb'
+      };
+    }
+
     return {
       iccProfileBytes: null,
       colorProfileLabel: 'Kein Profil',
@@ -464,7 +606,8 @@ async function resolveImportedProfileInfo(file, fileBytes) {
   };
 }
 
-function resolveProfileInfoFromDataUrl(dataUrl) {
+async function resolveProfileInfoFromDataUrl(dataUrl) {
+  const bytes = dataUrlToBytes(dataUrl);
   const icc = extractIccProfileFromDataUrl(dataUrl);
   if (icc) {
     return {
@@ -473,6 +616,19 @@ function resolveProfileInfoFromDataUrl(dataUrl) {
       colorProfileSource: 'embedded-jpeg-icc'
     };
   }
+
+  if (bytes && isJpegBytes(bytes)) {
+    const exifColorSpace = extractExifColorSpaceFromJpegBytes(bytes);
+    if (exifColorSpace === 1) {
+      const srgb = await loadFallbackSrgbIccBytes();
+      return {
+        iccProfileBytes: srgb,
+        colorProfileLabel: 'sRGB',
+        colorProfileSource: 'jpeg-exif-srgb'
+      };
+    }
+  }
+
   return {
     iccProfileBytes: null,
     colorProfileLabel: 'Kein Profil',
@@ -1856,8 +2012,20 @@ function updateManualScaleControlsForSelected() {
   if (menuWhiteBorderMm) menuWhiteBorderMm.value = (getWhiteBorderMm(selected) / MM_PER_CM).toFixed(1);
   if (menuWhiteBorderMode) menuWhiteBorderMode.value = mode;
   const target = getWhiteTargetDimensions(selected);
-  if (menuTargetWidthCm) menuTargetWidthCm.value = target ? (target.widthMm / MM_PER_CM).toFixed(1) : '';
-  if (menuTargetHeightCm) menuTargetHeightCm.value = target ? (target.heightMm / MM_PER_CM).toFixed(1) : '';
+  if (menuTargetWidthCm) {
+    if (target) {
+      menuTargetWidthCm.value = (target.widthMm / MM_PER_CM).toFixed(1);
+    } else if (mode !== 'target') {
+      menuTargetWidthCm.value = '';
+    }
+  }
+  if (menuTargetHeightCm) {
+    if (target) {
+      menuTargetHeightCm.value = (target.heightMm / MM_PER_CM).toFixed(1);
+    } else if (mode !== 'target') {
+      menuTargetHeightCm.value = '';
+    }
+  }
 }
 
 function applyWhiteBorderToSelected() {
@@ -3514,8 +3682,18 @@ function runNesting() {
 }
 
 function getSelectedPlacement() {
+  if (!state.selectedId) return null;
   const page = getCurrentPagePlacements();
-  return page.find((item) => item.id === state.selectedId) || null;
+  const local = page.find((item) => item.id === state.selectedId) || null;
+  if (local) return local;
+
+  const global = findPlacementByIdGlobal(state.selectedId);
+  if (global) {
+    state.currentPage = global.pageIndex;
+    return global.item;
+  }
+
+  return null;
 }
 
 function selectPlacementById(id) {
@@ -3721,7 +3899,7 @@ async function loadProjectFromFile(file) {
   const photos = [];
   for (const p of project.photos || []) {
     const image = await loadImage(p.dataUrl);
-    const profileInfo = resolveProfileInfoFromDataUrl(p.dataUrl);
+    const profileInfo = await resolveProfileInfoFromDataUrl(p.dataUrl);
     photos.push({
       id: p.id,
       name: p.name,
