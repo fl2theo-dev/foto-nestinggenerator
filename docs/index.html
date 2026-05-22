@@ -374,7 +374,7 @@
         Dummy fuer die gemeinsame UI-Entwicklung. Fokus: exakte Geometrie, reproduzierbare Regmarks
         und duale Ausgabe fuer Druck und Kontur.
       </p>
-      <p>Datum: 21. Mai 2026</p>
+      <p>Datum: 22. Mai 2026</p>
     </header>
 
     <nav class="tabs" aria-label="Ansichten">
@@ -391,7 +391,7 @@
         <p>
           Entwicklung einer Anwendung, die mehrere Fotos auf Rollenmaterial nestet, pro Bogen
           vier Regmarks setzt (bei Einzelmotiv um das Motiv) und zwei synchronisierte Produktionsdateien erzeugt:
-          Druckdatei (Foto + Regmarks) und Konturdatei (Regmarks + Schneidekontur).
+          Druckdatei (Foto + Regmarks + Barcode) und Konturdatei (Regmarks + Schneidekontur + Barcode).
         </p>
         <span class="pill">Regmark-Durchmesser: 5 mm</span>
         <span class="pill">4 Regmarks pro Bogen</span>
@@ -399,6 +399,9 @@
         <span class="pill">Beschnitteditor mit greifbaren Ecken</span>
         <span class="pill">Drag-and-Drop vom Motivpool auf den Bogen</span>
         <span class="pill">Ausschnitt und Druckgroesse entkoppelt</span>
+        <span class="pill">Barcode zwischen Regmarks ausserhalb Motiv/Weissrand</span>
+        <span class="pill">Barcode-Hoehe maximal 7 mm</span>
+        <span class="pill">Kontur-Dateiname = Barcode-Code</span>
       </article>
 
       <section class="grid-3">
@@ -419,10 +422,14 @@
         <article class="card">
           <h3>Ausgabe</h3>
           <ul>
-            <li>Datei A: Druckdaten mit Motiv und Regmarks.</li>
-            <li>Datei B: Regmarks und Schneidekontur.</li>
+            <li>Datei A: Druck-JPEG mit Motiv, Regmarks und Barcode.</li>
+            <li>Datei B: Kontur-PDF mit Regmarks, Schneidekontur und demselben Barcode.</li>
             <li>Beide Dateien aus derselben Geometriequelle.</li>
-            <li>PDF-Seitenhoehe ist variabel und endet an der effektiven Nutzhoehe.</li>
+            <li>Ein gemeinsamer Job-Code wird pro Layout erzeugt und in beiden Exportdateien verwendet.</li>
+            <li>Kontur-PDF-Dateiname entspricht exakt dem abgebildeten Barcode-Code.</li>
+            <li>Barcode liegt zwischen Regmarks, ausserhalb Motivflaeche und ausserhalb Weissrand.</li>
+            <li>Barcode-Balkenhoehe ist auf 7 mm begrenzt; Klarschrift steht rechts daneben.</li>
+            <li>Druck-JPEG enthaelt verpflichtend ein ICC-Profil (Importprofil oder AdobeRGB-Fallback).</li>
             <li>Deckungsgleiche Koordinaten als Muss-Kriterium.</li>
             <li>Bogen-spezifisches Nachordnen ueber separaten "Bogen nesten"-Schritt.</li>
           </ul>
@@ -486,6 +493,9 @@
             <li>Interne Einheit ausschliesslich mm.</li>
             <li>Ein gemeinsamer Ursprung fuer alle Ausgaben.</li>
             <li>Keine zweite Geometrieberechnung fuer Datei B.</li>
+            <li>Barcode in Druck-JPEG und Kontur-PDF muss identisch sein.</li>
+            <li>Dateiname der Kontur-PDF muss dem Barcode-Code entsprechen.</li>
+            <li>ICC-Profil im Druck-JPEG ist verpflichtend: Importprofil, sonst AdobeRGB1998.</li>
             <li>Automatischer Toleranztest mit max. 0.01 mm Abweichung.</li>
           </ul>
         </article>
@@ -688,13 +698,14 @@
     const fallbackVersionData = {
       releases: [
         {
-          version: '0.3.4',
-          date: '2026-05-21',
-          summary: 'Beschnitt-Definition von Zielgroesse entkoppelt und Ratio-Verhalten korrigiert.',
+          version: '0.3.3',
+          date: '2026-05-22',
+          summary: 'Druckexport auf JPEG mit verbindlicher ICC-Profilfuehrung umgestellt.',
           changes: [
-            'Der Beschnittbereich legt nur den Ausschnitt fest und veraendert beim Uebernehmen nicht mehr automatisch die Druckgroesse.',
-            'Zielbreite und Zielhoehe steuern ausschliesslich die Ausgabegroesse sowie die DPI-Anzeige.',
-            'Die Skalierungs-Ratio basiert nun auf dem tatsaechlichen Crop-Inhalt statt auf der zuletzt gesetzten Platzierungsgeometrie.'
+            'Druckexport liefert jetzt JPEG-Dateien pro Seite statt Druck-PDF.',
+            'ICC-Profil des importierten Bildes wird im Druck-JPEG beibehalten, falls eindeutig vorhanden.',
+            'Fallback ist zwingend AdobeRGB1998, wenn kein oder ein gemischtes Eingangsprofil erkannt wird.',
+            'Hotfolder-Export schreibt Druck als JPEG und Kontur weiterhin als PDF.'
           ]
         },
         {

@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Foto-Nestinggenerator MVP</title>
+  <title>Foto NG [0.3.3]</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
   <header class="topbar">
-    <h1>Foto-Nestinggenerator</h1>
+    <h1>Foto NG [0.3.3]</h1>
     <div class="topbar-links">
       <a href="../docs/index.html">Konzept</a>
     </div>
@@ -16,7 +16,7 @@
 
   <main class="layout">
     <section class="panel controls">
-      <h2>Job-Setup</h2>
+      <h2>Job</h2>
 
       <label for="photoInput">Fotos laden</label>
       <input id="photoInput" type="file" accept="image/*" multiple />
@@ -72,39 +72,32 @@
 
       <h3>Export</h3>
       <div class="actions">
-        <button id="exportPrintPdfBtn">Export Druck-PDF</button>
+        <button id="exportPrintPdfBtn">Export Druck-JPEG</button>
         <button id="exportContourPdfBtn">Export Kontur-PDF</button>
         <button id="exportHotfolderBtn" class="secondary">Export in Hotfolder</button>
       </div>
-      <p class="hint">High-End Druck: Exportiere Druck-PDF und konvertiere es lokal mit ICC-Profil via scripts/make-pdfx.js.</p>
-
-      <h3>Manuelles Nesting</h3>
-      <p class="hint">Auswahl im Canvas per Klick auf Motiv.</p>
-      <div class="row">
-        <div>
-          <label for="moveStep">Verschiebe-Schritt (mm)</label>
-          <input id="moveStep" type="number" min="1" value="5" />
-        </div>
-        <div>
-          <label for="selectedItem">Ausgewaehltes Motiv</label>
-          <input id="selectedItem" type="text" value="Keins" readonly />
-        </div>
-      </div>
-
-      <div class="actions">
-        <button id="rotateBtn">Rotation 90 Grad</button>
-        <button id="duplicateBtn">Duplizieren</button>
-        <button id="unplaceBtn" class="secondary">Zurueck in Liste</button>
-      </div>
-
-      <div class="actions">
-        <button id="moveLeftBtn" class="secondary">Links</button>
-        <button id="moveRightBtn" class="secondary">Rechts</button>
-        <button id="moveUpBtn" class="secondary">Hoch</button>
-        <button id="moveDownBtn" class="secondary">Runter</button>
-      </div>
+      <p class="hint">Druck wird als JPEG exportiert (ICC-Profil aus Import, bei Bedarf AdobeRGB-Fallback). Kontur bleibt PDF. Fuer Produktions-Workflow bitte "Export in Hotfolder" nutzen.</p>
 
       <p id="status" class="status">Keine Fotos geladen.</p>
+    </section>
+
+    <section class="panel list">
+      <div class="list-head">
+        <h2>Motive</h2>
+        <div class="actions list-actions">
+          <button id="placeSelectionBtn" class="secondary">Platzieren</button>
+          <button id="deleteSelectionBtn" class="secondary">Löschen</button>
+        </div>
+      </div>
+      <div id="oversizeEditor" class="oversize-editor" hidden>
+        <p id="oversizeEditorText" class="oversize-editor-text"></p>
+        <div class="oversize-editor-row">
+          <label for="oversizeWidthCmInput">Groesse eingeben: Breite (cm)</label>
+          <input id="oversizeWidthCmInput" type="number" min="1" step="0.1" />
+          <button id="oversizeApplyBtn" class="secondary">Uebernehmen</button>
+        </div>
+      </div>
+      <div id="photoTableBody" class="photo-card-list"></div>
     </section>
 
     <section class="panel preview">
@@ -118,43 +111,63 @@
       <div class="preview-canvas-wrap">
         <canvas id="previewCanvas" width="1400" height="900"></canvas>
         <div id="manualNestingMenu" class="manual-menu" hidden>
-          <button id="menuRotateBtn" class="manual-btn" title="Rotation 90 Grad">Rotieren</button>
-          <button id="menuDuplicateBtn" class="manual-btn" title="Duplizieren">Duplizieren</button>
-          <button id="menuUnplaceBtn" class="manual-btn" title="Zurueck in Liste">Zurueck</button>
-          <button id="menuUpBtn" class="manual-btn" title="Nach oben">↑</button>
-          <button id="menuLeftBtn" class="manual-btn" title="Nach links">←</button>
-          <button id="menuRightBtn" class="manual-btn" title="Nach rechts">→</button>
-          <button id="menuDownBtn" class="manual-btn" title="Nach unten">↓</button>
-          <button id="menuShowImageBtn" class="manual-btn" title="Bild im Overlay anzeigen">Bild anzeigen</button>
-          <button id="menuCropBtn" class="manual-btn" title="Beschnitt auf Zielgroesse festlegen">Beschnitt festlegen</button>
-          <div class="manual-scale">
-            <div class="manual-scale-line"><strong>Aktuelle Groesse:</strong> <span id="menuCurrentSizeValue">-</span></div>
-            <div class="manual-scale-grid">
-              <label for="menuScaleWidthCm">Zielbreite (cm)</label>
-              <input id="menuScaleWidthCm" type="number" min="0.1" step="0.1" />
-              <label for="menuScaleHeightCm">Zielhoehe (cm)</label>
-              <input id="menuScaleHeightCm" type="number" min="0.1" step="0.1" />
-              <label for="menuScaleDpi">DPI</label>
-              <input id="menuScaleDpi" type="number" min="1" step="1" />
+          <div class="manual-menu-header" id="manualMenuHeader">Menü</div>
+          <div class="manual-menu-content">
+            <div class="manual-buttons-row">
+              <button id="menuRotateBtn" class="manual-btn" title="Rotation 90 Grad">Rotieren</button>
+              <button id="menuDuplicateBtn" class="manual-btn" title="Duplizieren">Duplizieren</button>
+              <button id="menuUnplaceBtn" class="manual-btn" title="Aus Vorschau entfernen">Entfernen</button>
+              <button id="menuCropBtn" class="manual-btn" title="Beschnitt auf Zielgroesse festlegen">Beschnitt</button>
             </div>
-            <button id="menuApplyScaleBtn" class="manual-btn" title="Skalierung uebernehmen">Skalierung anwenden</button>
+            <div class="manual-scale">
+              <div class="manual-scale-line"><strong>Aktuelle Groesse:</strong> <span id="menuCurrentSizeValue">-</span></div>
+              <div class="manual-scale-grid-row">
+                <div class="manual-scale-field">
+                  <label for="menuScaleWidthCm">Breite (cm)</label>
+                  <input id="menuScaleWidthCm" type="number" min="0.1" step="0.1" />
+                </div>
+                <div class="manual-scale-field">
+                  <label for="menuScaleHeightCm">Höhe (cm)</label>
+                  <input id="menuScaleHeightCm" type="number" min="0.1" step="0.1" />
+                </div>
+                <div class="manual-scale-field">
+                  <label for="menuScaleDpi">DPI</label>
+                  <input id="menuScaleDpi" type="number" min="1" step="1" />
+                </div>
+              </div>
+              <div class="manual-scale-grid-row">
+                <div class="manual-scale-field">
+                  <label for="menuWhiteBorderMode">Weißrand-Modus</label>
+                  <select id="menuWhiteBorderMode">
+                    <option value="outside">nach außen</option>
+                    <option value="inside">nach innen</option>
+                  </select>
+                </div>
+                <div class="manual-scale-field">
+                  <label for="menuWhiteBorderMm">Weißrand (cm)</label>
+                  <input id="menuWhiteBorderMm" type="number" min="0" step="0.1" />
+                </div>
+              </div>
+              <button id="menuApplyBtn" class="manual-btn manual-apply-btn" title="Änderungen übernehmen">Anwenden</button>
+            </div>
           </div>
         </div>
       </div>
       <p class="hint">Regmarks: 4 pro Bogen (außen, für Cutter-Scan). Drag & Drop für manuelles Platzieren im Canvas.</p>
     </section>
-
-    <section class="panel list">
-      <div class="list-head">
-        <h2>Motive</h2>
-        <div class="actions list-actions">
-          <button id="placeSelectionBtn" class="secondary">Auswahl platzieren</button>
-          <button id="deleteSelectionBtn" class="secondary">Auswahl loeschen</button>
-        </div>
-      </div>
-      <div id="photoTableBody" class="photo-card-list"></div>
-    </section>
   </main>
+
+  <div id="appLoadingOverlay" class="app-loading-overlay" hidden>
+    <div class="app-loading-panel" role="status" aria-live="polite">
+      <div class="app-loading-header" id="appLoadingHeader">Status</div>
+      <div class="app-loading-content">
+        <video id="appLoadingVideo" class="app-loading-video" muted loop playsinline preload="auto">
+          <source src="./assets/Confused-Math-Lady.mp4" type="video/mp4" />
+        </video>
+        <p id="appLoadingText" class="app-loading-text">Motive werden platziert ...</p>
+      </div>
+    </div>
+  </div>
 
   <div id="photoOverlay" class="photo-overlay" hidden>
     <div class="photo-overlay-backdrop" data-close-overlay="true"></div>
@@ -188,7 +201,11 @@
             <span class="crop-ratio-sep">:</span>
             <input id="cropRatioW" type="number" min="0.01" step="0.01" placeholder="B" />
           </div>
-          <p class="crop-field-hint">Eingabe verändert den Ausschnitt. Ziehen aktualisiert die Felder.</p>
+          <label class="crop-lock-row" for="cropLockRatio">
+            <input id="cropLockRatio" type="checkbox" checked />
+            <span>Ratio sperren</span>
+          </label>
+          <p class="crop-field-hint">Bei aktiver Sperre wird nur skaliert, das Verhaeltnis bleibt fix.</p>
         </div>
 
         <div class="crop-field-group">

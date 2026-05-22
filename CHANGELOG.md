@@ -2,6 +2,15 @@
 
 Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 
+## [0.3.3] - 2026-05-22
+
+### Changed
+
+- Druckexport in der App von Druck-PDF auf Druck-JPEG pro Seite umgestellt.
+- ICC-Profilfuehrung im Druck-JPEG verbindlich gemacht: Importprofil wird beibehalten, sonst AdobeRGB1998 als Fallback.
+- Hotfolder-Export auf Druck-JPEG plus Kontur-PDF aktualisiert.
+- App-Version in der UI auf Foto NG [0.3.3] angehoben.
+
 ## [0.3.0] - 2026-05-21
 
 ### Added

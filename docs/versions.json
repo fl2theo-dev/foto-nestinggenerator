@@ -1,6 +1,46 @@
 {
   "releases": [
     {
+      "version": "0.3.3",
+      "date": "2026-05-22",
+      "summary": "Druckexport auf JPEG mit verbindlicher ICC-Profilfuehrung umgestellt.",
+      "changes": [
+        "Druckexport liefert jetzt JPEG-Dateien pro Seite statt Druck-PDF.",
+        "ICC-Profil des importierten Bildes wird im Druck-JPEG beibehalten, falls eindeutig vorhanden.",
+        "Fallback ist zwingend AdobeRGB1998, wenn kein oder ein gemischtes Eingangsprofil erkannt wird.",
+        "Hotfolder-Export schreibt Druck als JPEG und Kontur weiterhin als PDF.",
+        "App-Titel auf Foto NG [0.3.3] aktualisiert und Doku auf neuen Exportworkflow angepasst."
+      ]
+    },
+    {
+      "version": "0.3.2",
+      "date": "2026-05-22",
+      "summary": "Beschnitt-Menue um sperrbare Ratio erweitert und Skalierungsverhalten praezisiert.",
+      "changes": [
+        "Neuer Schalter 'Ratio sperren' im Beschnitt-Menue integriert (standardmaessig aktiv).",
+        "Bei aktiver Ratio-Sperre wird nur noch die Groesse skaliert, das Seitenverhaeltnis bleibt fix.",
+        "Resize per Eck-Handles respektiert die gesperrte Ratio und verhindert unbeabsichtigte Verhaeltnisaenderungen.",
+        "Ratio-Inputs werden bei aktiver Sperre deaktiviert; Umschalten konserviert das aktuelle Verhaeltnis.",
+        "App-Titel auf Foto NG [0.3.2] aktualisiert."
+      ]
+    },
+    {
+      "version": "0.3.1",
+      "date": "2026-05-22",
+      "summary": "Export- und Layout-Fixes plus Barcode-Workflow fuer Produktionskonsistenz umgesetzt.",
+      "changes": [
+        "Weissrand-Logik stabilisiert: inside/outside-Verhalten korrigiert, Rotation haelt Inhalt und Rand konsistent.",
+        "Beschnitt- und Weissrand-Interaktion korrigiert, damit Crop-Auswahl beim Anwenden des Weissrands nicht ueberschrieben wird.",
+        "DPI-Eingabe korrigiert: kein Zurueckspringen mehr auf Minimalwert waehrend der Eingabe.",
+        "PDF-Export robuster gemacht: jsPDF-CDN-Fallback, korrekte Orientierung, enge Seitengroesse inkl. Regmarks + 2 mm Sicherheitsrand.",
+        "Drag-and-Drop aus der Motivliste in den Bogen wiederhergestellt (inkl. text/plain-Fallback und stabiler Dragover-Logik).",
+        "Schwebendes Bearbeitungsmenue positioniert sich wieder am selektierten Motiv statt am unteren Bildschirmrand.",
+        "Barcode zwischen Regmarks integriert (Code39), ausserhalb Motiv/Weissrand platziert, Balkenhoehe auf max. 7 mm begrenzt, Klarschrift rechts daneben.",
+        "Kontur-PDF-Dateiname auf Barcode-Code umgestellt; derselbe Code wird in Druck-PDF und Kontur-PDF verwendet.",
+        "Doku in docs/index.html auf neuen Export- und Barcode-Workflow aktualisiert."
+      ]
+    },
+    {
       "version": "0.3.0",
       "date": "2026-05-21",
       "summary": "Mehrseiten-Workflow, Projektdateien und Hotfolder-Export umgesetzt.",

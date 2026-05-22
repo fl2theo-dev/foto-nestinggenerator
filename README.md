@@ -2,7 +2,7 @@
 
 Projekt fuer automatisches Foto-Nesting auf Rollenmaterial mit Regmarks und dualem Export:
 
-- Druckdatei: Motive + Regmarks
+- Druckdatei: JPEG (Motive + Regmarks, ICC-Profil aus Import bzw. AdobeRGB-Fallback)
 - Konturdatei: Regmarks + Schneidekontur
 
 ## Aktueller Stand
@@ -40,9 +40,9 @@ Optional mit Auto-Installation:
 
 ## Hochwertiger Druck (lokal, mit ICC)
 
-1. In der App `Druck-PDF` erzeugen.
-2. Passendes ICC-Profil bereitstellen (z. B. vom RIP/Druckdienstleister).
-3. Mit Ghostscript konvertieren:
+1. In der App `Druck-JPEG` erzeugen (Profil wird aus Import uebernommen, Fallback: AdobeRGB).
+2. Falls ein PDF/X-Workflow notwendig ist: zunaechst aus JPEG/Pipeline ein PDF erzeugen und dann mit passendem ICC-Profil konvertieren.
+3. Fuer bestehende PDF-Konvertierung via Ghostscript:
 
 ```bash
 npm run pdfx:convert -- --in druck_motive_regmarks.pdf --out druck_pdfx.pdf --icc ./profiles/DEIN_PROFIL.icc

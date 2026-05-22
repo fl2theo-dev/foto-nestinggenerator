@@ -1,6 +1,6 @@
 {
   "name": "foto-nestinggenerator",
-  "version": "0.2.3",
+  "version": "0.3.3",
   "private": true,
   "description": "Projekt fuer Foto-Nesting mit Versionierungs-Workflow",
   "scripts": {

@@ -27,12 +27,481 @@ function getSheetRegmarks(page, config, pageHeightMm = config.maxHeight) {
     { cx: clamp(rightCx, minCx, maxCx), cy: clamp(bottomCy, minCy, maxCy), r: REGMARK_RADIUS_MM }
   ];
 }
+let jsPdfLoadPromise = null;
+
+function ensureJsPdfLoaded() {
+  if (window.jspdf && window.jspdf.jsPDF) {
+    return Promise.resolve(true);
+  }
+
+  if (jsPdfLoadPromise) {
+    return jsPdfLoadPromise;
+  }
+
+  jsPdfLoadPromise = new Promise((resolve) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js';
+    script.async = true;
+    script.onload = () => resolve(Boolean(window.jspdf && window.jspdf.jsPDF));
+    script.onerror = () => resolve(false);
+    document.head.appendChild(script);
+  });
+
+  return jsPdfLoadPromise;
+}
 const MM_PER_INCH = 25.4;
 const MM_PER_POINT = MM_PER_INCH / 72;
 const MM_PER_CM = 10;
 const REGMARK_DIAMETER_MM = 5;
 const REGMARK_RADIUS_MM = REGMARK_DIAMETER_MM / 2;
 const REGMARK_OFFSET_MM = 3 + REGMARK_RADIUS_MM;
+const FALLBACK_ADOBE_RGB_ICC_URL = './assets/AdobeRGB1998.icc';
+const JPEG_ICC_CHUNK_DATA_MAX_BYTES = 65519;
+
+let fallbackAdobeRgbIccBytesPromise = null;
+
+const CODE39_PATTERNS = {
+  '0': 'nnnwwnwnn',
+  '1': 'wnnwnnnnw',
+  '2': 'nnwwnnnnw',
+  '3': 'wnwwnnnnn',
+  '4': 'nnnwwnnnw',
+  '5': 'wnnwwnnnn',
+  '6': 'nnwwwnnnn',
+  '7': 'nnnwnnwnw',
+  '8': 'wnnwnnwnn',
+  '9': 'nnwwnnwnn',
+  A: 'wnnnnwnnw',
+  B: 'nnwnnwnnw',
+  C: 'wnwnnwnnn',
+  D: 'nnnnwwnnw',
+  E: 'wnnnwwnnn',
+  F: 'nnwnwwnnn',
+  G: 'nnnnnwwnw',
+  H: 'wnnnnwwnn',
+  I: 'nnwnnwwnn',
+  J: 'nnnnwwwnn',
+  K: 'wnnnnnnww',
+  L: 'nnwnnnnww',
+  M: 'wnwnnnnwn',
+  N: 'nnnnwnnww',
+  O: 'wnnnwnnwn',
+  P: 'nnwnwnnwn',
+  Q: 'nnnnnnwww',
+  R: 'wnnnnnwwn',
+  S: 'nnwnnnwwn',
+  T: 'nnnnwnwwn',
+  U: 'wwnnnnnnw',
+  V: 'nwwnnnnnw',
+  W: 'wwwnnnnnn',
+  X: 'nwnnwnnnw',
+  Y: 'wwnnwnnnn',
+  Z: 'nwwnwnnnn',
+  '-': 'nwnnnnwnw',
+  '.': 'wwnnnnwnn',
+  ' ': 'nwwnnnwnn',
+  '$': 'nwnwnwnnn',
+  '/': 'nwnwnnnwn',
+  '+': 'nwnnnwnwn',
+  '%': 'nnnwnwnwn',
+  '*': 'nwnnwnwnn'
+};
+
+function generateBarcodeId(length = 10) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let value = '';
+  for (let i = 0; i < length; i += 1) {
+    value += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return value;
+}
+
+function invalidateExportBarcodeId() {
+  state.exportBarcodeId = null;
+}
+
+function getOrCreateExportBarcodeId() {
+  if (!state.exportBarcodeId) {
+    state.exportBarcodeId = generateBarcodeId();
+  }
+  return state.exportBarcodeId;
+}
+
+function estimateCode39Modules(value, wideFactor = 2.5) {
+  const encoded = `*${String(value || '').toUpperCase()}*`;
+  let modules = 0;
+  for (let i = 0; i < encoded.length; i += 1) {
+    const pattern = CODE39_PATTERNS[encoded[i]] || CODE39_PATTERNS['*'];
+    for (const token of pattern) {
+      modules += token === 'w' ? wideFactor : 1;
+    }
+    if (i < encoded.length - 1) modules += 1;
+  }
+  return modules;
+}
+
+function getBarcodePlacementMm(regmarks, geometry, contentBounds = null) {
+  if (!Array.isArray(regmarks) || regmarks.length < 2) {
+    return {
+      xMm: Math.max(2, geometry.widthMm * 0.15),
+      yMm: 2,
+      maxWidthMm: Math.max(20, geometry.widthMm * 0.7),
+      barHeightMm: 7
+    };
+  }
+
+  const sortedByY = [...regmarks].sort((a, b) => (a.cy - b.cy) || (a.cx - b.cx));
+  const topTwo = sortedByY.slice(0, 2).sort((a, b) => a.cx - b.cx);
+  const bottomTwo = sortedByY.slice(-2).sort((a, b) => a.cx - b.cx);
+  const left = topTwo[0];
+  const right = topTwo[1];
+  const inset = 1;
+  const xStart = left.cx + left.r + inset;
+  const xEnd = right.cx - right.r - inset;
+  const maxWidthMm = Math.max(20, xEnd - xStart);
+  const barHeightMm = 7;
+
+  const contentTopY = Number(contentBounds?.topY);
+  const contentBottomY = Number(contentBounds?.bottomY);
+
+  const topCenterY = (topTwo[0].cy + topTwo[1].cy) / 2;
+  const topLaneY = topCenterY - barHeightMm / 2;
+  const topLaneFits = Number.isFinite(contentTopY)
+    ? (topLaneY >= 1 && topLaneY + barHeightMm <= contentTopY - 1)
+    : (topLaneY >= 1 && topLaneY + barHeightMm <= geometry.heightMm - 1);
+
+  if (topLaneFits) {
+    return { xMm: xStart, yMm: topLaneY, maxWidthMm, barHeightMm };
+  }
+
+  const bottomLeft = bottomTwo[0] || left;
+  const bottomRight = bottomTwo[1] || right;
+  const xStartBottom = bottomLeft.cx + bottomLeft.r + inset;
+  const xEndBottom = bottomRight.cx - bottomRight.r - inset;
+  const maxWidthMmBottom = Math.max(20, xEndBottom - xStartBottom);
+  const bottomCenterY = (bottomLeft.cy + bottomRight.cy) / 2;
+  const bottomLaneY = bottomCenterY - barHeightMm / 2;
+  const bottomLaneFits = Number.isFinite(contentBottomY)
+    ? (bottomLaneY >= contentBottomY + 1 && bottomLaneY + barHeightMm <= geometry.heightMm - 1)
+    : (bottomLaneY >= 1 && bottomLaneY + barHeightMm <= geometry.heightMm - 1);
+
+  if (bottomLaneFits) {
+    return { xMm: xStartBottom, yMm: bottomLaneY, maxWidthMm: maxWidthMmBottom, barHeightMm };
+  }
+
+  const yMm = Math.max(1, Math.min(topLaneY, geometry.heightMm - barHeightMm - 1));
+
+  return { xMm: xStart, yMm, maxWidthMm, barHeightMm };
+}
+
+function drawCode39BarcodeOnPdf(pdf, value, placement) {
+  const textValue = String(value || '').toUpperCase();
+  const encoded = `*${textValue}*`;
+  const wideFactor = 2.5;
+  const modules = estimateCode39Modules(value, wideFactor);
+  const textGapMm = 1.5;
+  pdf.setFontSize(6);
+  const textWidthMm = typeof pdf.getTextWidth === 'function' ? pdf.getTextWidth(textValue) : textValue.length * 1.6;
+  const availableBarcodeWidthMm = Math.max(8, placement.maxWidthMm - textGapMm - textWidthMm);
+  const moduleWidthMm = Math.max(0.18, Math.min(0.6, availableBarcodeWidthMm / Math.max(1, modules)));
+  const barcodeWidthMm = modules * moduleWidthMm;
+  const totalWidthMm = barcodeWidthMm + textGapMm + textWidthMm;
+  const startX = placement.xMm + Math.max(0, (placement.maxWidthMm - totalWidthMm) / 2);
+  let cursorX = startX;
+
+  pdf.setFillColor(0, 0, 0);
+
+  for (let i = 0; i < encoded.length; i += 1) {
+    const pattern = CODE39_PATTERNS[encoded[i]] || CODE39_PATTERNS['*'];
+    for (let j = 0; j < pattern.length; j += 1) {
+      const width = (pattern[j] === 'w' ? wideFactor : 1) * moduleWidthMm;
+      const isBar = j % 2 === 0;
+      if (isBar) {
+        pdf.rect(cursorX, placement.yMm, width, placement.barHeightMm, 'F');
+      }
+      cursorX += width;
+    }
+
+    if (i < encoded.length - 1) {
+      cursorX += moduleWidthMm;
+    }
+  }
+
+  pdf.setTextColor(0, 0, 0);
+  const textX = startX + barcodeWidthMm + textGapMm;
+  const textY = placement.yMm + placement.barHeightMm * 0.72;
+  pdf.text(textValue, textX, textY);
+}
+
+function arraysEqual(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function concatUint8Arrays(parts) {
+  const total = parts.reduce((sum, p) => sum + p.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+  return out;
+}
+
+function isJpegBytes(bytes) {
+  return bytes && bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8;
+}
+
+function hasIccSegmentSignature(bytes, start) {
+  const signature = [
+    0x49, 0x43, 0x43, 0x5f, 0x50, 0x52, 0x4f, 0x46, 0x49, 0x4c, 0x45, 0x00
+  ];
+  if (start + signature.length > bytes.length) return false;
+  for (let i = 0; i < signature.length; i += 1) {
+    if (bytes[start + i] !== signature[i]) return false;
+  }
+  return true;
+}
+
+function extractIccProfileFromJpegBytes(bytes) {
+  if (!isJpegBytes(bytes)) return null;
+
+  const chunks = new Map();
+  let expectedChunks = 0;
+  let offset = 2;
+
+  while (offset + 4 <= bytes.length) {
+    if (bytes[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+
+    const marker = bytes[offset + 1];
+    if (marker === 0xd9 || marker === 0xda) break;
+    if (marker === 0x00 || marker === 0xff) {
+      offset += 1;
+      continue;
+    }
+
+    if (offset + 4 > bytes.length) break;
+    const segmentLength = (bytes[offset + 2] << 8) | bytes[offset + 3];
+    if (segmentLength < 2) break;
+    const segmentEnd = offset + 2 + segmentLength;
+    if (segmentEnd > bytes.length) break;
+
+    if (marker === 0xe2) {
+      const payloadStart = offset + 4;
+      const payloadLength = segmentLength - 2;
+      if (payloadLength >= 14 && hasIccSegmentSignature(bytes, payloadStart)) {
+        const seq = bytes[payloadStart + 12];
+        const total = bytes[payloadStart + 13];
+        const chunk = bytes.slice(payloadStart + 14, segmentEnd);
+        if (seq > 0 && total > 0) {
+          expectedChunks = Math.max(expectedChunks, total);
+          chunks.set(seq, chunk);
+        }
+      }
+    }
+
+    offset = segmentEnd;
+  }
+
+  if (chunks.size === 0) return null;
+  if (expectedChunks === 0) return null;
+  for (let i = 1; i <= expectedChunks; i += 1) {
+    if (!chunks.has(i)) return null;
+  }
+
+  const ordered = [];
+  for (let i = 1; i <= expectedChunks; i += 1) {
+    ordered.push(chunks.get(i));
+  }
+  return concatUint8Arrays(ordered);
+}
+
+function dataUrlToBytes(dataUrl) {
+  const commaIdx = dataUrl.indexOf(',');
+  if (commaIdx === -1) return null;
+  const base64 = dataUrl.slice(commaIdx + 1);
+  const binary = atob(base64);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    out[i] = binary.charCodeAt(i);
+  }
+  return out;
+}
+
+function extractIccProfileFromFileBytes(file, bytes) {
+  const fileName = String(file?.name || '').toLowerCase();
+  const mime = String(file?.type || '').toLowerCase();
+  const isJpeg = mime === 'image/jpeg' || mime === 'image/jpg' || fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') || isJpegBytes(bytes);
+  if (!isJpeg) return null;
+  return extractIccProfileFromJpegBytes(bytes);
+}
+
+function extractIccProfileFromDataUrl(dataUrl) {
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/jpeg')) return null;
+  const bytes = dataUrlToBytes(dataUrl);
+  if (!bytes) return null;
+  return extractIccProfileFromJpegBytes(bytes);
+}
+
+async function loadFallbackAdobeRgbIccBytes() {
+  if (!fallbackAdobeRgbIccBytesPromise) {
+    fallbackAdobeRgbIccBytesPromise = (async () => {
+      const response = await fetch(FALLBACK_ADOBE_RGB_ICC_URL, { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error(`AdobeRGB-Fallbackprofil nicht gefunden (${response.status}).`);
+      }
+      const buffer = await response.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      if (bytes.length < 128) {
+        throw new Error('AdobeRGB-Fallbackprofil ist ungueltig.');
+      }
+      return bytes;
+    })();
+  }
+  return fallbackAdobeRgbIccBytesPromise;
+}
+
+async function resolveIccProfileForPage(page) {
+  const withProfile = page
+    .map((item) => item.iccProfileBytes)
+    .filter((profile) => profile instanceof Uint8Array && profile.length > 0);
+
+  if (withProfile.length === 0) {
+    return {
+      bytes: await loadFallbackAdobeRgbIccBytes(),
+      source: 'fallback-no-input-profile'
+    };
+  }
+
+  const base = withProfile[0];
+  const allEqual = withProfile.every((profile) => arraysEqual(profile, base));
+  if (allEqual) {
+    return {
+      bytes: base,
+      source: 'input-profile'
+    };
+  }
+
+  return {
+    bytes: await loadFallbackAdobeRgbIccBytes(),
+    source: 'fallback-mixed-input-profiles'
+  };
+}
+
+function removeIccApp2Segments(jpegBytes) {
+  if (!isJpegBytes(jpegBytes)) return jpegBytes;
+
+  const kept = [jpegBytes.slice(0, 2)];
+  let offset = 2;
+
+  while (offset + 1 < jpegBytes.length) {
+    if (jpegBytes[offset] !== 0xff) {
+      kept.push(jpegBytes.slice(offset));
+      break;
+    }
+
+    const marker = jpegBytes[offset + 1];
+    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+      kept.push(jpegBytes.slice(offset, offset + 2));
+      offset += 2;
+      continue;
+    }
+
+    if (marker === 0xda || marker === 0xd9) {
+      kept.push(jpegBytes.slice(offset));
+      break;
+    }
+
+    if (offset + 4 > jpegBytes.length) {
+      kept.push(jpegBytes.slice(offset));
+      break;
+    }
+
+    const segmentLength = (jpegBytes[offset + 2] << 8) | jpegBytes[offset + 3];
+    if (segmentLength < 2) {
+      kept.push(jpegBytes.slice(offset));
+      break;
+    }
+
+    const segmentEnd = offset + 2 + segmentLength;
+    if (segmentEnd > jpegBytes.length) {
+      kept.push(jpegBytes.slice(offset));
+      break;
+    }
+
+    const isIccSegment = marker === 0xe2 && segmentLength >= 16 && hasIccSegmentSignature(jpegBytes, offset + 4);
+    if (!isIccSegment) {
+      kept.push(jpegBytes.slice(offset, segmentEnd));
+    }
+
+    offset = segmentEnd;
+  }
+
+  return concatUint8Arrays(kept);
+}
+
+function buildIccApp2Segments(iccProfileBytes) {
+  const bytes = iccProfileBytes instanceof Uint8Array ? iccProfileBytes : new Uint8Array(iccProfileBytes || []);
+  const chunkCount = Math.max(1, Math.ceil(bytes.length / JPEG_ICC_CHUNK_DATA_MAX_BYTES));
+  const chunks = [];
+
+  for (let i = 0; i < chunkCount; i += 1) {
+    const chunkStart = i * JPEG_ICC_CHUNK_DATA_MAX_BYTES;
+    const chunkEnd = Math.min(bytes.length, chunkStart + JPEG_ICC_CHUNK_DATA_MAX_BYTES);
+    const chunk = bytes.slice(chunkStart, chunkEnd);
+    const payloadLength = 14 + chunk.length;
+    const segmentLength = payloadLength + 2;
+    const segment = new Uint8Array(4 + payloadLength);
+
+    segment[0] = 0xff;
+    segment[1] = 0xe2;
+    segment[2] = (segmentLength >> 8) & 0xff;
+    segment[3] = segmentLength & 0xff;
+
+    segment.set([
+      0x49, 0x43, 0x43, 0x5f, 0x50, 0x52, 0x4f, 0x46, 0x49, 0x4c, 0x45, 0x00
+    ], 4);
+    segment[16] = i + 1;
+    segment[17] = chunkCount;
+    segment.set(chunk, 18);
+
+    chunks.push(segment);
+  }
+
+  return chunks;
+}
+
+function embedIccProfileIntoJpegBytes(jpegBytes, iccProfileBytes) {
+  const cleanJpeg = removeIccApp2Segments(jpegBytes);
+  const iccSegments = buildIccApp2Segments(iccProfileBytes);
+  return concatUint8Arrays([cleanJpeg.slice(0, 2), ...iccSegments, cleanJpeg.slice(2)]);
+}
+
+async function blobToBytes(blob) {
+  const buffer = await blob.arrayBuffer();
+  return new Uint8Array(buffer);
+}
+
+function canvasToJpegBlob(canvas, quality = 0.98) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error('JPEG konnte nicht erzeugt werden.'));
+        return;
+      }
+      resolve(blob);
+    }, 'image/jpeg', quality);
+  });
+}
 
 const photoInput = document.getElementById('photoInput');
 const rollWidthInput = document.getElementById('rollWidth');
@@ -43,6 +512,9 @@ const allowRotateInput = document.getElementById('allowRotate');
 const paddingInput = document.getElementById('padding');
 const moveStepInput = document.getElementById('moveStep');
 const selectedItemInput = document.getElementById('selectedItem');
+const appLoadingOverlay = document.getElementById('appLoadingOverlay');
+const appLoadingText = document.getElementById('appLoadingText');
+const appLoadingVideo = document.getElementById('appLoadingVideo');
 
 const nestBtn = document.getElementById('nestBtn');
 const nestPageBtn = document.getElementById('nestPageBtn');
@@ -55,12 +527,6 @@ const projectLoadInput = document.getElementById('projectLoadInput');
 const exportPrintPdfBtn = document.getElementById('exportPrintPdfBtn');
 const exportContourPdfBtn = document.getElementById('exportContourPdfBtn');
 const exportHotfolderBtn = document.getElementById('exportHotfolderBtn');
-const rotateBtn = document.getElementById('rotateBtn');
-const unplaceBtn = document.getElementById('unplaceBtn');
-const moveLeftBtn = document.getElementById('moveLeftBtn');
-const moveRightBtn = document.getElementById('moveRightBtn');
-const moveUpBtn = document.getElementById('moveUpBtn');
-const moveDownBtn = document.getElementById('moveDownBtn');
 const prevPageBtn = document.getElementById('prevPageBtn');
 const nextPageBtn = document.getElementById('nextPageBtn');
 const pageIndicator = document.getElementById('pageIndicator');
@@ -70,17 +536,14 @@ const menuRotateBtn = document.getElementById('menuRotateBtn');
 const menuDuplicateBtn = document.getElementById('menuDuplicateBtn');
 const menuUnplaceBtn = document.getElementById('menuUnplaceBtn');
 const duplicateBtn = document.getElementById('duplicateBtn');
-const menuUpBtn = document.getElementById('menuUpBtn');
-const menuLeftBtn = document.getElementById('menuLeftBtn');
-const menuRightBtn = document.getElementById('menuRightBtn');
-const menuDownBtn = document.getElementById('menuDownBtn');
-const menuShowImageBtn = document.getElementById('menuShowImageBtn');
 const menuCropBtn = document.getElementById('menuCropBtn');
 const menuCurrentSizeValue = document.getElementById('menuCurrentSizeValue');
 const menuScaleWidthCm = document.getElementById('menuScaleWidthCm');
 const menuScaleHeightCm = document.getElementById('menuScaleHeightCm');
 const menuScaleDpi = document.getElementById('menuScaleDpi');
-const menuApplyScaleBtn = document.getElementById('menuApplyScaleBtn');
+const menuApplyBtn = document.getElementById('menuApplyBtn');
+const menuWhiteBorderMm = document.getElementById('menuWhiteBorderMm');
+const menuWhiteBorderMode = document.getElementById('menuWhiteBorderMode');
 const photoOverlay = document.getElementById('photoOverlay');
 const photoOverlayViewport = document.getElementById('photoOverlayViewport');
 const photoOverlayImage = document.getElementById('photoOverlayImage');
@@ -99,6 +562,7 @@ const cropRectWPercent = document.getElementById('cropRectWPercent');
 const cropRectHPercent = document.getElementById('cropRectHPercent');
 const cropRatioH = document.getElementById('cropRatioH');
 const cropRatioW = document.getElementById('cropRatioW');
+const cropLockRatio = document.getElementById('cropLockRatio');
 
 const overlayView = {
   scale: 1,
@@ -114,7 +578,12 @@ const overlayView = {
 
 const statusEl = document.getElementById('status');
 const tableBody = document.getElementById('photoTableBody');
+const oversizeEditor = document.getElementById('oversizeEditor');
+const oversizeEditorText = document.getElementById('oversizeEditorText');
+const oversizeWidthCmInput = document.getElementById('oversizeWidthCmInput');
+const oversizeApplyBtn = document.getElementById('oversizeApplyBtn');
 const previewCanvas = document.getElementById('previewCanvas');
+const previewCanvasWrap = document.querySelector('.preview-canvas-wrap');
 const ctx = previewCanvas.getContext('2d');
 
 const PHOTO_CARD_ROW_HEIGHT = 86;
@@ -126,6 +595,7 @@ const state = {
   listSelection: new Set(),
   selectedId: null,
   currentPage: 0,
+  exportBarcodeId: null,
   drag: {
     active: false,
     id: null,
@@ -148,6 +618,7 @@ const virtualPhotoList = {
 const cropEditor = {
   active: false,
   aspect: 1,
+  lockedAspect: 1,
   rect: { x: 0, y: 0, w: 0, h: 0 },
   display: { x: 0, y: 0, w: 0, h: 0 },
   dragging: false,
@@ -165,6 +636,425 @@ function setStatus(message) {
 
 function pxToMm(px, dpi) {
   return (px / dpi) * MM_PER_INCH;
+}
+
+function getMoveStepMm() {
+  return Math.max(1, Number(moveStepInput?.value || 0) || 5);
+}
+
+function setSelectedItemName(value) {
+  if (selectedItemInput) {
+    selectedItemInput.value = value || 'Keins';
+  }
+}
+
+function getOriginalContentDimensions(item) {
+  return {
+    widthMm: Number(item.originalWidthMm) || 0,
+    heightMm: Number(item.originalHeightMm) || 0
+  };
+}
+
+function getConfiguredContentDimensions(item) {
+  const original = getOriginalContentDimensions(item);
+  const widthMm = Number(item.targetWidthMm);
+  const heightMm = Number(item.targetHeightMm);
+  if (Number.isFinite(widthMm) && widthMm > 0 && Number.isFinite(heightMm) && heightMm > 0) {
+    return { widthMm, heightMm };
+  }
+  return original;
+}
+
+function getWhiteBorderMode(item) {
+  return item?.whiteBorderMode === 'inside' ? 'inside' : 'outside';
+}
+
+function getWhiteBorderMm(item) {
+  const value = Number(item?.whiteBorderMm);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return value;
+}
+
+function getVisibleContentDimensions(item, contentWidthMm, contentHeightMm) {
+  // The content mm dimensions already encode the crop's aspect ratio
+  // (applyCropOverlay always sets heightMm = widthMm / cropAspect).
+  // Multiplying by cropNorm.w/h would double-apply the crop, distorting the border sizes.
+  return { widthMm: contentWidthMm, heightMm: contentHeightMm };
+}
+
+function getWhiteBorderComponentsForContent(item, contentWidthMm, contentHeightMm) {
+  const longEdgeBorderMm = getWhiteBorderMm(item);
+  if (longEdgeBorderMm <= 0 || contentWidthMm <= 0 || contentHeightMm <= 0) {
+    return { borderX: 0, borderY: 0 };
+  }
+
+  const visible = getVisibleContentDimensions(item, contentWidthMm, contentHeightMm);
+  const visibleW = Math.max(1e-6, visible.widthMm);
+  const visibleH = Math.max(1e-6, visible.heightMm);
+
+  if (visibleW >= visibleH) {
+    return {
+      borderX: longEdgeBorderMm * (visibleW / visibleH),
+      borderY: longEdgeBorderMm
+    };
+  }
+
+  return {
+    borderX: longEdgeBorderMm,
+    borderY: longEdgeBorderMm * (visibleH / visibleW)
+  };
+}
+
+function getOuterDimensionsForContent(item, contentWidthMm, contentHeightMm) {
+  const { borderX, borderY } = getWhiteBorderComponentsForContent(item, contentWidthMm, contentHeightMm);
+  if (getWhiteBorderMode(item) === 'outside') {
+    return {
+      widthMm: contentWidthMm + borderX * 2,
+      heightMm: contentHeightMm + borderY * 2
+    };
+  }
+  return { widthMm: contentWidthMm, heightMm: contentHeightMm };
+}
+
+function getPlacementOuterDimensions(item) {
+  const widthMm = Number(item.widthMm);
+  const heightMm = Number(item.heightMm);
+  const hasPlacementDims = Number.isFinite(widthMm) && widthMm > 0 && Number.isFinite(heightMm) && heightMm > 0;
+  if (hasPlacementDims) {
+    return { widthMm, heightMm };
+  }
+  const content = getConfiguredContentDimensions(item);
+  return getOuterDimensionsForContent(item, content.widthMm, content.heightMm);
+}
+
+function getPlacementImageRectMm(item) {
+  const outer = getPlacementOuterDimensions(item);
+  const mode = getWhiteBorderMode(item);
+  const border = getWhiteBorderComponentsForContent(item, outer.widthMm, outer.heightMm);
+
+  if (mode === 'outside') {
+    const photoWidth = Number(item.contentWidthMm) > 0 ? Number(item.contentWidthMm) : outer.widthMm;
+    const photoHeight = Number(item.contentHeightMm) > 0 ? Number(item.contentHeightMm) : outer.heightMm;
+    const insetX = Math.max(0, (outer.widthMm - photoWidth) / 2);
+    const insetY = Math.max(0, (outer.heightMm - photoHeight) / 2);
+    return {
+      xMm: insetX,
+      yMm: insetY,
+      widthMm: Math.max(0.1, Math.min(photoWidth, outer.widthMm - insetX * 2)),
+      heightMm: Math.max(0.1, Math.min(photoHeight, outer.heightMm - insetY * 2))
+    };
+  }
+
+  const insetX = Math.max(0, Math.min(border.borderX, outer.widthMm / 2 - 0.05));
+  const insetY = Math.max(0, Math.min(border.borderY, outer.heightMm / 2 - 0.05));
+
+  return {
+    xMm: insetX,
+    yMm: insetY,
+    widthMm: Math.max(0.1, outer.widthMm - insetX * 2),
+    heightMm: Math.max(0.1, outer.heightMm - insetY * 2)
+  };
+}
+
+function getUsablePageArea(config) {
+  return {
+    widthMm: Math.max(1, config.rollWidth - config.padding * 2),
+    heightMm: Math.max(1, config.maxHeight - config.padding * 2)
+  };
+}
+
+function canOuterDimensionsFit(widthMm, heightMm, config) {
+  const usable = getUsablePageArea(config);
+  if (widthMm <= usable.widthMm + 1e-6 && heightMm <= usable.heightMm + 1e-6) return true;
+  if (config.allowRotate && heightMm <= usable.widthMm + 1e-6 && widthMm <= usable.heightMm + 1e-6) return true;
+  return false;
+}
+
+function isPhotoOversizeForConfig(photo, config) {
+  const original = getOriginalContentDimensions(photo);
+  const outer = getOuterDimensionsForContent(photo, original.widthMm, original.heightMm);
+  return !canOuterDimensionsFit(outer.widthMm, outer.heightMm, config);
+}
+
+function getRecommendedContentWidthMm(photo, config) {
+  const original = getOriginalContentDimensions(photo);
+  if (!original.widthMm || !original.heightMm) return original.widthMm;
+
+  const aspect = original.heightMm / original.widthMm;
+  const preferredOuterWidth = Math.max(10, config.rollWidth - 20);
+  const usable = getUsablePageArea(config);
+  const preferredContentWidth = Math.max(10, Math.min(preferredOuterWidth, usable.widthMm));
+  const preferredContentHeight = preferredContentWidth * aspect;
+  const preferredOuter = getOuterDimensionsForContent(photo, preferredContentWidth, preferredContentHeight);
+  if (canOuterDimensionsFit(preferredOuter.widthMm, preferredOuter.heightMm, config)) {
+    return preferredContentWidth;
+  }
+
+  const scales = [];
+  const estimateScale = (sourceW, sourceH) => {
+    let lo = 0.01;
+    let hi = 2;
+    for (let i = 0; i < 24; i++) {
+      const mid = (lo + hi) / 2;
+      const testOuter = getOuterDimensionsForContent(photo, sourceW * mid, sourceH * mid);
+      if (testOuter.widthMm <= usable.widthMm + 1e-6 && testOuter.heightMm <= usable.heightMm + 1e-6) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo;
+  };
+
+  scales.push(estimateScale(original.widthMm, original.heightMm));
+  if (config.allowRotate) {
+    scales.push(estimateScale(original.heightMm, original.widthMm));
+  }
+
+  scales.push(
+    Math.min(
+      usable.widthMm / Math.max(1e-6, original.widthMm),
+      usable.heightMm / Math.max(1e-6, original.heightMm)
+    )
+  );
+  if (config.allowRotate) {
+    scales.push(
+      Math.min(
+        usable.widthMm / Math.max(1e-6, original.heightMm),
+        usable.heightMm / Math.max(1e-6, original.widthMm)
+      )
+    );
+  }
+
+  const bestScale = Math.max(0.05, ...scales.filter((value) => Number.isFinite(value) && value > 0));
+  return Math.max(10, original.widthMm * bestScale);
+}
+
+function setPhotoTargetWidthMm(photo, widthMm, source = null) {
+  const original = getOriginalContentDimensions(photo);
+  const safeWidthMm = Math.max(10, Number(widthMm) || original.widthMm || 10);
+  const aspect = original.heightMm / Math.max(1e-6, original.widthMm || 1);
+  photo.targetWidthMm = safeWidthMm;
+  photo.targetHeightMm = safeWidthMm * aspect;
+  photo.sizeOverrideSource = source;
+}
+
+function ensurePhotoAutoFit(photo, config) {
+  const oversize = isPhotoOversizeForConfig(photo, config);
+  if (!oversize) {
+    if (photo.sizeOverrideSource === 'auto') {
+      const original = getOriginalContentDimensions(photo);
+      photo.targetWidthMm = original.widthMm;
+      photo.targetHeightMm = original.heightMm;
+      photo.sizeOverrideSource = null;
+    }
+    return;
+  }
+
+  if (photo.sizeOverrideSource === 'manual') return;
+  setPhotoTargetWidthMm(photo, getRecommendedContentWidthMm(photo, config), 'auto');
+}
+
+function refreshPhotoSizing(config = getConfig()) {
+  state.photos.forEach((photo) => ensurePhotoAutoFit(photo, config));
+}
+
+function setBusyState(active, message = 'Motive werden platziert ...') {
+  if (appLoadingOverlay) {
+    appLoadingOverlay.hidden = !active;
+    if (active) {
+      positionOverlayOutsidePreview();
+    }
+  }
+  if (appLoadingText) {
+    appLoadingText.textContent = message;
+  }
+  document.body.classList.toggle('is-busy', active);
+  if (active && appLoadingVideo) {
+    const playPromise = appLoadingVideo.play();
+    if (playPromise?.catch) playPromise.catch(() => {});
+  }
+  if (!active && appLoadingVideo) {
+    appLoadingVideo.pause();
+    appLoadingVideo.currentTime = 0;
+  }
+}
+
+async function withBusyOverlay(message, work) {
+  setBusyState(true, message);
+  await new Promise((resolve) => window.requestAnimationFrame(resolve));
+  try {
+    return await work();
+  } finally {
+    setBusyState(false);
+  }
+}
+
+const overlayDragState = {
+  dragging: false,
+  startX: 0,
+  startY: 0,
+  currentX: 0,
+  currentY: 0
+};
+
+function positionOverlayOutsidePreview() {
+  if (!appLoadingOverlay || appLoadingOverlay.hidden) return;
+  
+  const canvasRect = previewCanvas?.getBoundingClientRect();
+  const overlayWidth = 540;
+  const overlayHeight = 280;
+  const padding = 16;
+  
+  let x = window.innerWidth / 2 - overlayWidth / 2;
+  let y = window.innerHeight / 2 - overlayHeight / 2;
+  
+  if (canvasRect) {
+    const rightSpace = window.innerWidth - canvasRect.right;
+    if (rightSpace > overlayWidth + padding) {
+      x = canvasRect.right + padding;
+      y = canvasRect.top + padding;
+    } else if (canvasRect.left > overlayWidth + padding) {
+      x = canvasRect.left - overlayWidth - padding;
+      y = canvasRect.top + padding;
+    } else if (window.innerHeight - canvasRect.bottom > overlayHeight + padding) {
+      x = window.innerWidth / 2 - overlayWidth / 2;
+      y = canvasRect.bottom + padding;
+    } else if (canvasRect.top > overlayHeight + padding) {
+      x = window.innerWidth / 2 - overlayWidth / 2;
+      y = canvasRect.top - overlayHeight - padding;
+    }
+  }
+  
+  x = Math.max(padding, Math.min(x, window.innerWidth - overlayWidth - padding));
+  y = Math.max(padding, Math.min(y, window.innerHeight - overlayHeight - padding));
+  
+  appLoadingOverlay.style.left = x + 'px';
+  appLoadingOverlay.style.top = y + 'px';
+  
+  overlayDragState.currentX = x;
+  overlayDragState.currentY = y;
+}
+
+function handleOverlayMouseDown(e) {
+  if (e.button !== 0) return;
+  const header = document.getElementById('appLoadingHeader');
+  if (!header || !header.contains(e.target)) return;
+  
+  overlayDragState.dragging = true;
+  overlayDragState.startX = e.clientX;
+  overlayDragState.startY = e.clientY;
+  
+  appLoadingOverlay?.classList.add('is-dragging');
+  e.preventDefault();
+}
+
+function handleOverlayMouseMove(e) {
+  if (!overlayDragState.dragging || !appLoadingOverlay) return;
+  
+  const deltaX = e.clientX - overlayDragState.startX;
+  const deltaY = e.clientY - overlayDragState.startY;
+  
+  const newX = overlayDragState.currentX + deltaX;
+  const newY = overlayDragState.currentY + deltaY;
+  
+  const overlayWidth = appLoadingOverlay.offsetWidth;
+  const overlayHeight = appLoadingOverlay.offsetHeight;
+  const padding = 10;
+  
+  const clampX = Math.max(padding, Math.min(newX, window.innerWidth - overlayWidth - padding));
+  const clampY = Math.max(padding, Math.min(newY, window.innerHeight - overlayHeight - padding));
+  
+  appLoadingOverlay.style.left = clampX + 'px';
+  appLoadingOverlay.style.top = clampY + 'px';
+}
+
+function handleOverlayMouseUp(e) {
+  if (!overlayDragState.dragging) return;
+  
+  overlayDragState.dragging = false;
+  overlayDragState.currentX = parseInt(appLoadingOverlay?.style.left || 0);
+  overlayDragState.currentY = parseInt(appLoadingOverlay?.style.top || 0);
+  
+  appLoadingOverlay?.classList.remove('is-dragging');
+}
+
+function initializeOverlayDragging() {
+  if (appLoadingOverlay) {
+    appLoadingOverlay.addEventListener('mousedown', handleOverlayMouseDown);
+    document.addEventListener('mousemove', handleOverlayMouseMove);
+    document.addEventListener('mouseup', handleOverlayMouseUp);
+  }
+}
+
+const menuDragState = {
+  dragging: false,
+  startX: 0,
+  startY: 0,
+  currentX: 0,
+  currentY: 0
+};
+
+function handleMenuMouseDown(e) {
+  if (e.button !== 0) return;
+  const header = document.getElementById('manualMenuHeader');
+  if (!header || !header.contains(e.target)) return;
+  
+  menuDragState.dragging = true;
+  menuDragState.startX = e.clientX;
+  menuDragState.startY = e.clientY;
+  
+  if (manualNestingMenu) {
+    menuDragState.currentX = manualNestingMenu.offsetLeft;
+    menuDragState.currentY = manualNestingMenu.offsetTop;
+    manualNestingMenu.classList.add('is-dragging');
+  }
+  e.preventDefault();
+}
+
+function handleMenuMouseMove(e) {
+  if (!menuDragState.dragging || !manualNestingMenu) return;
+  
+  const deltaX = e.clientX - menuDragState.startX;
+  const deltaY = e.clientY - menuDragState.startY;
+  
+  const newX = menuDragState.currentX + deltaX;
+  const newY = menuDragState.currentY + deltaY;
+  
+  const menuWidth = manualNestingMenu.offsetWidth;
+  const menuHeight = manualNestingMenu.offsetHeight;
+  const padding = 10;
+  const parent = manualNestingMenu.offsetParent;
+  
+  if (parent instanceof HTMLElement) {
+    const parentWidth = parent.clientWidth;
+    const parentHeight = parent.clientHeight;
+    
+    const clampX = Math.max(padding, Math.min(newX, parentWidth - menuWidth - padding));
+    const clampY = Math.max(padding, Math.min(newY, parentHeight - menuHeight - padding));
+    
+    manualNestingMenu.style.left = clampX + 'px';
+    manualNestingMenu.style.top = clampY + 'px';
+  }
+}
+
+function handleMenuMouseUp(e) {
+  if (!menuDragState.dragging) return;
+  
+  menuDragState.dragging = false;
+  if (manualNestingMenu) {
+    menuDragState.currentX = manualNestingMenu.offsetLeft;
+    menuDragState.currentY = manualNestingMenu.offsetTop;
+    manualNestingMenu.classList.remove('is-dragging');
+  }
+}
+
+function initializeMenuDragging() {
+  if (manualNestingMenu) {
+    manualNestingMenu.addEventListener('mousedown', handleMenuMouseDown);
+    document.addEventListener('mousemove', handleMenuMouseMove);
+    document.addEventListener('mouseup', handleMenuMouseUp);
+  }
 }
 
 function fileToDataURL(file) {
@@ -193,7 +1083,7 @@ function getConfig() {
     allowRotate: allowRotateInput.checked,
     padding: Number(paddingInput.value),
     dpi: Number(dpiInput.value),
-    moveStep: Number(moveStepInput.value)
+    moveStep: getMoveStepMm()
   };
 }
 
@@ -205,7 +1095,7 @@ function applyConfig(config) {
   if (typeof config.allowRotate === 'boolean') allowRotateInput.checked = config.allowRotate;
   if (typeof config.padding === 'number') paddingInput.value = String(config.padding);
   if (typeof config.dpi === 'number') dpiInput.value = String(config.dpi);
-  if (typeof config.moveStep === 'number') moveStepInput.value = String(config.moveStep);
+  if (typeof config.moveStep === 'number' && moveStepInput) moveStepInput.value = String(config.moveStep);
 }
 
 function getFootprintRect(item) {
@@ -225,9 +1115,13 @@ function getPlacedUsedBottom(placed, config) {
   return Math.max(config.padding, ...placed.map((p) => p.yMm + p.heightMm));
 }
 
+function getNestBaseDimensions(item) {
+  return getPlacementOuterDimensions(item);
+}
+
 function getRotationPenalty(variant, strategy) {
-  if (strategy === 'prefer-upright') return variant.rotated ? 1 : 0;
-  if (strategy === 'prefer-rotated') return variant.rotated ? 0 : 1;
+  if (strategy === 'prefer-upright') return variant.isRotationChange ? 1 : 0;
+  if (strategy === 'prefer-rotated') return variant.isRotationChange ? 0 : 1;
   return 0;
 }
 
@@ -291,7 +1185,11 @@ function splitFreeRects(freeRects, obstacle, gap) {
 }
 
 function nestSinglePageWithStrategy(photos, config, strategy) {
-  const sorted = [...photos].sort((a, b) => (b.originalWidthMm * b.originalHeightMm) - (a.originalWidthMm * a.originalHeightMm));
+  const sorted = [...photos].sort((a, b) => {
+    const aDims = getNestBaseDimensions(a);
+    const bDims = getNestBaseDimensions(b);
+    return (bDims.widthMm * bDims.heightMm) - (aDims.widthMm * aDims.heightMm);
+  });
   const placed = [];
   const placedIds = new Set();
   let freeRects = [
@@ -304,12 +1202,24 @@ function nestSinglePageWithStrategy(photos, config, strategy) {
   ];
 
   for (const photo of sorted) {
+    const baseDims = getNestBaseDimensions(photo);
+    const baseRotated = Boolean(photo.rotated);
     const variants = [];
     if (strategy !== 'force-rotated') {
-      variants.push({ width: photo.originalWidthMm, height: photo.originalHeightMm, rotated: false });
+      variants.push({
+        width: baseDims.widthMm,
+        height: baseDims.heightMm,
+        rotated: baseRotated,
+        isRotationChange: false
+      });
     }
     if (config.allowRotate && strategy !== 'force-upright') {
-      variants.push({ width: photo.originalHeightMm, height: photo.originalWidthMm, rotated: true });
+      variants.push({
+        width: baseDims.heightMm,
+        height: baseDims.widthMm,
+        rotated: !baseRotated,
+        isRotationChange: true
+      });
     }
 
     let best = null;
@@ -366,13 +1276,28 @@ function nestSinglePageWithStrategy(photos, config, strategy) {
       continue;
     }
 
+    // Preserve/fix contentWidthMm/contentHeightMm for white-border "outside" mode.
+    // When photos come from state.photos they have no contentWidthMm yet;
+    // when re-nesting existing placements the values exist but must be swapped on rotation.
+    let contentDimOverride = {};
+    if (getWhiteBorderMode(photo) === 'outside' && getWhiteBorderMm(photo) > 0) {
+      let cw = Number(photo.contentWidthMm) > 0 ? Number(photo.contentWidthMm) : getConfiguredContentDimensions(photo).widthMm;
+      let ch = Number(photo.contentHeightMm) > 0 ? Number(photo.contentHeightMm) : getConfiguredContentDimensions(photo).heightMm;
+      if (best.variant.isRotationChange) {
+        contentDimOverride = { contentWidthMm: ch, contentHeightMm: cw };
+      } else {
+        contentDimOverride = { contentWidthMm: cw, contentHeightMm: ch };
+      }
+    }
+
     placed.push({
       ...photo,
       xMm: best.rect.x,
       yMm: best.rect.y,
       widthMm: best.variant.width,
       heightMm: best.variant.height,
-      rotated: best.variant.rotated
+      rotated: best.variant.rotated,
+      ...contentDimOverride
     });
     placedIds.add(photo.id);
 
@@ -573,22 +1498,25 @@ function updateSelectionActionButtons() {
 }
 
 function getPlacementFromPhoto(photo) {
+  const outer = getPlacementOuterDimensions(photo);
   return {
     ...photo,
     xMm: 0,
     yMm: 0,
-    widthMm: photo.originalWidthMm,
-    heightMm: photo.originalHeightMm,
+    widthMm: outer.widthMm,
+    heightMm: outer.heightMm,
     rotated: false
   };
 }
 
 function placePhotoOnCurrentPageAt(photoId, dropXmm, dropYmm) {
   const photo = getPhotoById(photoId);
-  if (!photo) return false;
+  if (!photo) return null;
 
-  const removed = removePlacementByIdGlobal(photoId);
-  const base = removed?.item ? { ...removed.item } : getPlacementFromPhoto(photo);
+  const existing = findPlacementByIdGlobal(photoId);
+  const base = existing?.item
+    ? { ...existing.item, id: crypto.randomUUID() }
+    : getPlacementFromPhoto(photo);
 
   ensureCurrentPage();
   const page = getCurrentPagePlacements();
@@ -602,31 +1530,24 @@ function placePhotoOnCurrentPageAt(photoId, dropXmm, dropYmm) {
   const snapped = findNearestFreePlacement(candidate, page, config, null, {
     maxRadiusMm: Math.max(base.widthMm, base.heightMm) + 180,
     angleSamples: 24,
-    stepMm: Math.max(1, Number(moveStepInput.value || 0) || 2)
+    stepMm: getMoveStepMm()
   });
 
   if (!snapped) {
-    if (removed?.item) {
-      const restoreIndex = Math.min(Math.max(0, removed.pageIndex), state.pages.length);
-      if (!state.pages[restoreIndex]) {
-        state.pages.splice(restoreIndex, 0, []);
-      }
-      state.pages[restoreIndex].push(removed.item);
-      cleanupEmptyPages();
-    }
-    return false;
+    return null;
   }
 
-  page.push({
+  const placed = {
     ...base,
     xMm: snapped.xMm,
     yMm: snapped.yMm,
     widthMm: snapped.widthMm,
     heightMm: snapped.heightMm,
     rotated: snapped.rotated
-  });
+  };
+  page.push(placed);
 
-  return true;
+  return placed;
 }
 
 function nestCurrentPage() {
@@ -640,6 +1561,7 @@ function nestCurrentPage() {
   const config = getConfig();
   const result = nestSinglePage(page, config);
   state.pages[state.currentPage] = result.placed;
+  invalidateExportBarcodeId();
 
   if (result.remaining.length > 0) {
     setStatus(`Bogen genestet: ${result.placed.length} platziert, ${result.remaining.length} passen nicht auf diesen Bogen.`);
@@ -666,7 +1588,8 @@ function placeListSelectionOnCurrentPage() {
 
   selectedIds.forEach((id, index) => {
     const offset = index * 12;
-    if (placePhotoOnCurrentPageAt(id, startX + offset, startY + offset)) {
+    const placedItem = placePhotoOnCurrentPageAt(id, startX + offset, startY + offset);
+    if (placedItem) {
       placed += 1;
     }
   });
@@ -691,7 +1614,7 @@ function deleteListSelection() {
 
   if (state.selectedId && deleteSet.has(state.selectedId)) {
     state.selectedId = null;
-    selectedItemInput.value = 'Keins';
+    setSelectedItemName('Keins');
     hideManualMenu();
   }
 
@@ -737,6 +1660,8 @@ function updateManualScaleControlsForSelected() {
     if (menuScaleWidthCm) menuScaleWidthCm.value = '';
     if (menuScaleHeightCm) menuScaleHeightCm.value = '';
     if (menuScaleDpi) menuScaleDpi.value = '';
+    if (menuWhiteBorderMm) menuWhiteBorderMm.value = '';
+    if (menuWhiteBorderMode) menuWhiteBorderMode.value = 'outside';
     return;
   }
 
@@ -751,6 +1676,74 @@ function updateManualScaleControlsForSelected() {
   const dpiY = dims.pxHeight / (selected.heightMm / MM_PER_INCH);
   const avgDpi = (dpiX + dpiY) / 2;
   if (menuScaleDpi) menuScaleDpi.value = Number.isFinite(avgDpi) ? String(Math.round(avgDpi)) : '';
+  if (menuWhiteBorderMm) menuWhiteBorderMm.value = (getWhiteBorderMm(selected) / MM_PER_CM).toFixed(1);
+  if (menuWhiteBorderMode) menuWhiteBorderMode.value = getWhiteBorderMode(selected);
+}
+
+function applyWhiteBorderToSelected() {
+  const selected = getSelectedPlacement();
+  if (!selected) {
+    setStatus('Bitte zuerst ein Motiv in der Vorschau auswaehlen.');
+    return;
+  }
+
+  const inputValueCm = Math.max(0, Number(menuWhiteBorderMm?.value || 0));
+  const inputValueMm = inputValueCm * MM_PER_CM;
+  const inputMode = menuWhiteBorderMode?.value === 'inside' ? 'inside' : 'outside';
+
+  const hadStoredContent = Number(selected.contentWidthMm) > 0 && Number(selected.contentHeightMm) > 0;
+  const baseContentWidth = hadStoredContent ? Number(selected.contentWidthMm) : Number(selected.widthMm);
+  const baseContentHeight = hadStoredContent ? Number(selected.contentHeightMm) : Number(selected.heightMm);
+
+  selected.whiteBorderMm = inputValueMm;
+  selected.whiteBorderMode = inputMode;
+
+  const page = getCurrentPagePlacements();
+  const config = getConfig();
+
+  const photo = getPhotoById(selected.id);
+  if (photo) {
+    photo.whiteBorderMm = inputValueMm;
+    photo.whiteBorderMode = inputMode;
+  }
+
+  if (inputMode === 'outside' && inputValueMm > 0) {
+    selected.contentWidthMm = Math.max(1, baseContentWidth);
+    selected.contentHeightMm = Math.max(1, baseContentHeight);
+    selected.widthMm = Math.max(1, selected.contentWidthMm + inputValueMm * 2);
+    selected.heightMm = Math.max(1, selected.contentHeightMm + inputValueMm * 2);
+  } else {
+    selected.widthMm = Math.max(1, baseContentWidth);
+    selected.heightMm = Math.max(1, baseContentHeight);
+    selected.contentWidthMm = null;
+    selected.contentHeightMm = null;
+  }
+
+  if (inputMode === 'inside') {
+    ensurePhotoAutoFit(photo, config);
+  }
+
+  updateManualScaleControlsForSelected();
+  
+  drawPreview();
+  setStatus('Weissrand uebernommen.');
+}
+
+function updateOversizeEditor() {
+  if (!oversizeEditor || !oversizeEditorText || !oversizeWidthCmInput || !oversizeApplyBtn) return;
+
+  const selectedPhoto = state.selectedId ? getPhotoById(state.selectedId) : null;
+  const config = getConfig();
+  if (!selectedPhoto || !isPhotoOversizeForConfig(selectedPhoto, config)) {
+    oversizeEditor.hidden = true;
+    return;
+  }
+
+  oversizeEditor.hidden = false;
+  const dpi = Number(dpiInput.value) || 300;
+  oversizeEditorText.textContent = `Das Bild ist in ${dpi} dpi zu gross fuer die Papierbahn.`;
+  oversizeWidthCmInput.value = (getConfiguredContentDimensions(selectedPhoto).widthMm / MM_PER_CM).toFixed(1);
+  oversizeApplyBtn.disabled = false;
 }
 
 function syncScaleInputsByRatio(changedAxis) {
@@ -766,6 +1759,29 @@ function syncScaleInputsByRatio(changedAxis) {
   }
   if (changedAxis === 'height' && h > 0 && menuScaleWidthCm) {
     menuScaleWidthCm.value = (h * ratio).toFixed(1);
+  }
+}
+
+function updateSizeFromDpi() {
+  const selected = getSelectedPlacement();
+  if (!selected) return;
+
+  const targetDpi = Number(menuScaleDpi?.value || 0);
+  if (targetDpi <= 0) return;
+
+  const pxDims = getPlacementPixelDims(selected);
+  const calculatedWidthMm = (pxDims.pxWidth / targetDpi) * MM_PER_INCH;
+  const calculatedHeightMm = (pxDims.pxHeight / targetDpi) * MM_PER_INCH;
+  const widthMm = calculatedWidthMm;
+  const heightMm = calculatedHeightMm;
+  
+  // Update the width/height fields
+  if (menuScaleWidthCm) {
+    menuScaleWidthCm.value = (widthMm / MM_PER_CM).toFixed(1);
+    manualScaleLastEdited = 'width';
+  }
+  if (menuScaleHeightCm) {
+    menuScaleHeightCm.value = (heightMm / MM_PER_CM).toFixed(1);
   }
 }
 
@@ -827,7 +1843,7 @@ function applyScaleToSelected() {
   const snapped = findNearestFreePlacement(candidate, page, config, selected.id, {
     maxRadiusMm: Math.max(targetWidthMm, targetHeightMm) + 180,
     angleSamples: 24,
-    stepMm: Math.max(1, Number(moveStepInput.value || 0) || 2)
+    stepMm: getMoveStepMm()
   });
 
   if (!snapped) {
@@ -835,10 +1851,26 @@ function applyScaleToSelected() {
     return;
   }
 
+  const preservedWhiteBorderMm = selected.whiteBorderMm;
+  const preservedWhiteBorderMode = selected.whiteBorderMode;
+
   selected.xMm = snapped.xMm;
   selected.yMm = snapped.yMm;
   selected.widthMm = snapped.widthMm;
   selected.heightMm = snapped.heightMm;
+  selected.whiteBorderMm = preservedWhiteBorderMm;
+  selected.whiteBorderMode = preservedWhiteBorderMode;
+
+  // Keep content dimensions in sync for outside white-border mode.
+  // Otherwise a subsequent border apply can restore old dimensions and ignore scaling.
+  if (getWhiteBorderMode(selected) === 'outside' && getWhiteBorderMm(selected) > 0) {
+    const borderMm = getWhiteBorderMm(selected);
+    selected.contentWidthMm = Math.max(1, selected.widthMm - borderMm * 2);
+    selected.contentHeightMm = Math.max(1, selected.heightMm - borderMm * 2);
+  } else {
+    selected.contentWidthMm = null;
+    selected.contentHeightMm = null;
+  }
 
   updateManualScaleControlsForSelected();
   drawPreview();
@@ -967,6 +1999,8 @@ function buildRectFromHandleDrag(handle, anchor, pointer, iw, ih) {
 // Ratio-Inputs aus aktuellem Crop-Rect aktualisieren (normiert: max(H,W) = 10)
 function updateRatioInputsFromRect() {
   if (!cropEditor.active || !cropRatioH || !cropRatioW) return;
+  const ratioShown = Number(cropRatioH.value) > 0 && Number(cropRatioW.value) > 0;
+  if (isCropRatioLocked() && ratioShown && document.activeElement !== cropRatioH && document.activeElement !== cropRatioW) return;
   // Nicht überschreiben, solange der Nutzer in den Ratio-Feldern tippt
   if (document.activeElement === cropRatioH || document.activeElement === cropRatioW) return;
   const h = cropEditor.rect.h;
@@ -980,6 +2014,7 @@ function updateRatioInputsFromRect() {
 // Ratio aus Ratio-Inputs auf das Crop-Rect anwenden (Mittelpunkt bleibt, Grösse passt sich an)
 function applyCropRatioFromInputs() {
   if (!cropEditor.active) return;
+  if (isCropRatioLocked()) return;
   const selected = getSelectedPlacement();
   if (!selected) return;
   const rH = Number(cropRatioH?.value || 0);
@@ -1008,6 +2043,16 @@ function applyCropRatioFromInputs() {
   if (cropRectWPercent) cropRectWPercent.value = toPercent(cropEditor.rect.w, iwc).toFixed(2);
   if (cropRectHPercent) cropRectHPercent.value = toPercent(cropEditor.rect.h, ihc).toFixed(2);
   updateCropOverlayDpiInfo();
+}
+
+function isCropRatioLocked() {
+  return Boolean(cropLockRatio?.checked);
+}
+
+function syncCropRatioLockUi() {
+  const locked = isCropRatioLocked();
+  if (cropRatioH) cropRatioH.disabled = locked;
+  if (cropRatioW) cropRatioW.disabled = locked;
 }
 
 function updateCropRectInputs() {
@@ -1042,7 +2087,12 @@ function applyCropRectInputs(changedField) {
   if (changedField === 'w') w = Math.max(8, w);
   if (changedField === 'h') h = Math.max(8, h);
 
-  cropEditor.rect = clampCropRect({ x, y, w, h }, iw, ih);
+  let nextRect = { x, y, w, h };
+  if (isCropRatioLocked() && cropEditor.lockedAspect > 0 && (changedField === 'w' || changedField === 'h')) {
+    nextRect = fitRectToAspect(nextRect, cropEditor.lockedAspect);
+  }
+
+  cropEditor.rect = clampCropRect(nextRect, iw, ih);
   cropEditor.aspect = cropEditor.rect.w / Math.max(1e-6, cropEditor.rect.h);
   renderCropOverlay();
   updateCropRectInputs();
@@ -1165,28 +2215,31 @@ function getCurrentCropAspect() {
 
 function updateCropAspectFromInputs(changedAxis = null) {
   if (!cropEditor.active) return;
+  const ratioLocked = isCropRatioLocked();
 
   const aspect = getCurrentCropAspect(); // W/H
   const widthValue = Number(cropTargetWidthCm?.value || 0);
   const heightValue = Number(cropTargetHeightCm?.value || 0);
 
-  if (changedAxis === 'width' && widthValue > 0 && cropTargetHeightCm) {
-    cropTargetHeightCm.value = (widthValue / Math.max(1e-6, aspect)).toFixed(1);
-  } else if (changedAxis === 'height' && heightValue > 0 && cropTargetWidthCm) {
-    cropTargetWidthCm.value = (heightValue * aspect).toFixed(1);
-  } else if (changedAxis === null) {
-    if (widthValue > 0 && (!heightValue || heightValue <= 0) && cropTargetHeightCm) {
+  if (ratioLocked) {
+    if (changedAxis === 'width' && widthValue > 0 && cropTargetHeightCm) {
       cropTargetHeightCm.value = (widthValue / Math.max(1e-6, aspect)).toFixed(1);
-    } else if (heightValue > 0 && (!widthValue || widthValue <= 0) && cropTargetWidthCm) {
+    } else if (changedAxis === 'height' && heightValue > 0 && cropTargetWidthCm) {
       cropTargetWidthCm.value = (heightValue * aspect).toFixed(1);
+    } else if (changedAxis === null) {
+      if (widthValue > 0 && (!heightValue || heightValue <= 0) && cropTargetHeightCm) {
+        cropTargetHeightCm.value = (widthValue / Math.max(1e-6, aspect)).toFixed(1);
+      } else if (heightValue > 0 && (!widthValue || widthValue <= 0) && cropTargetWidthCm) {
+        cropTargetWidthCm.value = (heightValue * aspect).toFixed(1);
+      }
     }
   }
 
   if (menuScaleWidthCm && cropTargetWidthCm) menuScaleWidthCm.value = cropTargetWidthCm.value;
   if (menuScaleHeightCm && cropTargetHeightCm) menuScaleHeightCm.value = cropTargetHeightCm.value;
 
-  // Wenn Druckgrösse geändert wurde: Ratio-Inputs aus Druckgrösse setzen und Ausschnitt anpassen
-  if (changedAxis !== null) {
+  // Nur ohne Sperre darf die Druckgroesse das Ausschnitt-Verhaeltnis direkt treiben.
+  if (!ratioLocked && changedAxis !== null) {
     const newW = Number(cropTargetWidthCm?.value || 0);
     const newH = Number(cropTargetHeightCm?.value || 0);
     if (newW > 0 && newH > 0 && cropRatioH && cropRatioW) {
@@ -1218,6 +2271,7 @@ function openCropOverlayForSelected() {
 
   cropEditor.active = true;
   cropEditor.aspect = rect.w / Math.max(1e-6, rect.h);
+  cropEditor.lockedAspect = cropEditor.aspect;
   cropEditor.rect = rect;
   cropEditor.dragging = false;
   cropEditor.dragMode = null;
@@ -1227,6 +2281,7 @@ function openCropOverlayForSelected() {
 
   cropOverlay.hidden = false;
   document.body.style.overflow = 'hidden';
+  syncCropRatioLockUi();
   updateCropAspectFromInputs();
   renderCropOverlay();
   updateCropRectInputs();
@@ -1272,7 +2327,20 @@ function applyCropOverlay() {
   const targetW = Number(cropTargetWidthCm?.value || 0);
   const targetH = Number(cropTargetHeightCm?.value || 0);
 
-  if (targetW > 0) {
+  const borderMm = getWhiteBorderMm(selected);
+  const hasOutsideBorder = getWhiteBorderMode(selected) === 'outside' && borderMm > 0 && Number(selected.contentWidthMm) > 0;
+
+  if (hasOutsideBorder) {
+    // targetW/H refer to the OUTER size (incl. border), which is what the size inputs show.
+    // Derive content dimensions from the outer target, then recompute outer height.
+    const outerW = targetW > 0 ? targetW * MM_PER_CM : (targetH > 0 ? targetH * MM_PER_CM * cropAspectWH : Number(selected.widthMm));
+    const contentW = Math.max(1, outerW - 2 * borderMm);
+    const contentH = contentW / Math.max(1e-6, cropAspectWH);
+    selected.contentWidthMm = contentW;
+    selected.contentHeightMm = contentH;
+    selected.widthMm = outerW;
+    selected.heightMm = contentH + 2 * borderMm;
+  } else if (targetW > 0) {
     // Breite aus Zielfeld, Höhe immer aus Beschnitt-Verhältnis ableiten
     selected.widthMm = targetW * MM_PER_CM;
     selected.heightMm = selected.widthMm / Math.max(1e-6, cropAspectWH);
@@ -1321,7 +2389,7 @@ function clampCandidateToBounds(candidate, config) {
 }
 
 function findNearestFreePlacement(candidate, pagePlacements, config, ignoreId = null, options = {}) {
-  const stepMm = Math.max(1, Number(options.stepMm) || Number(moveStepInput.value) || 2);
+  const stepMm = Math.max(1, Number(options.stepMm) || getMoveStepMm());
   const maxRadiusMm = Math.max(stepMm, Number(options.maxRadiusMm) || 120);
   const angleSamples = Math.max(8, Number(options.angleSamples) || 16);
 
@@ -1388,10 +2456,10 @@ function createPhotoCardElement(item, index) {
 
   card.innerHTML = `
     <input class="photo-card-select" type="checkbox" aria-label="${item.name} auswaehlen" ${item.isChecked ? 'checked' : ''} />
-    <img class="photo-card-thumb" src="${item.thumbSrc}" alt="Vorschau ${item.name}" loading="lazy" decoding="async" />
+    <img class="photo-card-thumb" src="${item.thumbSrc}" alt="Vorschau ${item.name}" loading="lazy" decoding="async" draggable="false" />
     <div class="photo-card-lines">
       <div class="photo-line-1">${item.name}</div>
-      <div class="photo-line-2">${item.pixelWidth}x${item.pixelHeight} px | ${item.widthCm.toFixed(1)} x ${item.heightCm.toFixed(1)} cm</div>
+      <div class="photo-line-2">${item.pixelWidth}x${item.pixelHeight} px | Ausgabe ${item.outputWidthCm.toFixed(1)} x ${item.outputHeightCm.toFixed(1)} cm</div>
       <div class="photo-line-3">Auf Seite ${item.onPage || '-'}</div>
     </div>
   `;
@@ -1419,6 +2487,7 @@ function createPhotoCardElement(item, index) {
   card.addEventListener('dragstart', (event) => {
     if (!event.dataTransfer) return;
     event.dataTransfer.setData('text/photo-id', item.id);
+    event.dataTransfer.setData('text/plain', item.id);
     event.dataTransfer.effectAllowed = 'move';
   });
 
@@ -1456,9 +2525,26 @@ function ensureVirtualizedListInitialized() {
     renderVirtualizedPhotoCards();
   });
   window.addEventListener('resize', () => {
+    resizePreviewCanvas();
     renderVirtualizedPhotoCards();
+    if (!appLoadingOverlay?.hidden) {
+      positionOverlayOutsidePreview();
+    }
   });
+  initializeOverlayDragging();
+  initializeMenuDragging();
   virtualListInitialized = true;
+}
+
+function resizePreviewCanvas() {
+  if (!previewCanvas || !previewCanvasWrap) return;
+  const rect = previewCanvasWrap.getBoundingClientRect();
+  const width = Math.max(480, Math.floor(rect.width));
+  const height = Math.max(420, Math.floor(rect.height));
+  if (previewCanvas.width === width && previewCanvas.height === height) return;
+  previewCanvas.width = width;
+  previewCanvas.height = height;
+  drawPreview();
 }
 
 function drawPreview() {
@@ -1493,22 +2579,34 @@ function drawPreview() {
     const y = mapY(item.yMm);
     const w = item.widthMm * scale;
     const h = item.heightMm * scale;
+    const imageRect = getPlacementImageRectMm(item);
+    const imageX = mapX(item.xMm + imageRect.xMm);
+    const imageY = mapY(item.yMm + imageRect.yMm);
+    const imageW = imageRect.widthMm * scale;
+    const imageH = imageRect.heightMm * scale;
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(x, y, w, h);
 
     if (item.image) {
       const crop = getCropPixels(item);
       if (item.rotated) {
         ctx.save();
-        ctx.translate(x, y + h);
+        ctx.translate(imageX, imageY + imageH);
         ctx.rotate(-Math.PI / 2);
-        ctx.drawImage(item.image, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, h, w);
+        ctx.drawImage(item.image, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, imageH, imageW);
         ctx.restore();
       } else {
-        ctx.drawImage(item.image, crop.sx, crop.sy, crop.sw, crop.sh, x, y, w, h);
+        ctx.drawImage(item.image, crop.sx, crop.sy, crop.sw, crop.sh, imageX, imageY, imageW, imageH);
       }
     } else {
       ctx.fillStyle = '#9fd0c4';
-      ctx.fillRect(x, y, w, h);
+      ctx.fillRect(imageX, imageY, imageW, imageH);
     }
+
+    ctx.strokeStyle = '#d9d2c3';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, w, h);
 
     if (item.id === state.selectedId) {
       ctx.strokeStyle = '#e07a1f';
@@ -1559,14 +2657,19 @@ function renderTable() {
   virtualPhotoList.items = state.photos.map((photo) => ({
     ...photo,
     onPage: placementMap.get(photo.id) || null,
-    widthCm: photo.originalWidthMm / 10,
-    heightCm: photo.originalHeightMm / 10,
+    outputWidthCm: getPlacementOuterDimensions(photo).widthMm / 10,
+    outputHeightCm: getPlacementOuterDimensions(photo).heightMm / 10,
+    targetWidthCm: getConfiguredContentDimensions(photo).widthMm / 10,
+    whiteBorderMm: getWhiteBorderMm(photo),
+    whiteBorderMode: getWhiteBorderMode(photo),
+    dpi: Number(dpiInput.value) || 300,
     thumbSrc: photo.thumbnailDataUrl || photo.dataUrl,
     isChecked: state.listSelection.has(photo.id)
   }));
 
   updateSelectionActionButtons();
   renderVirtualizedPhotoCards();
+  updateOversizeEditor();
 }
 
 function openPhotoOverlay(photo) {
@@ -1665,9 +2768,204 @@ function getEffectivePageHeightMm(page, config) {
   return getPageUsedHeightMm(page, config);
 }
 
-function buildPdfDocument(includePhotos) {
+function getPdfPageGeometry(page, config) {
+  const safetyMm = 2;
+  const baseHeight = getEffectivePageHeightMm(page, config);
+  const regmarks = getSheetRegmarks(page, config, baseHeight);
+
+  const contentMinX = Math.min(...page.map((item) => item.xMm));
+  const contentMinY = Math.min(...page.map((item) => item.yMm));
+  const contentMaxX = Math.max(...page.map((item) => item.xMm + item.widthMm));
+  const contentMaxY = Math.max(...page.map((item) => item.yMm + item.heightMm));
+
+  let minX = contentMinX;
+  let minY = contentMinY;
+  let maxX = contentMaxX;
+  let maxY = Math.max(contentMaxY, baseHeight);
+
+  for (const reg of regmarks) {
+    minX = Math.min(minX, reg.cx - reg.r);
+    minY = Math.min(minY, reg.cy - reg.r);
+    maxX = Math.max(maxX, reg.cx + reg.r);
+    maxY = Math.max(maxY, reg.cy + reg.r);
+  }
+
+  minX -= safetyMm;
+  minY -= safetyMm;
+  maxX += safetyMm;
+  maxY += safetyMm;
+
+  return {
+    widthMm: Math.max(1, maxX - minX),
+    heightMm: Math.max(1, maxY - minY),
+    offsetX: -minX,
+    offsetY: -minY,
+    contentHeightMm: baseHeight,
+    regmarks
+  };
+}
+
+function drawCode39BarcodeOnCanvas(ctx2d, value, placement, pxPerMm) {
+  const textValue = String(value || '').toUpperCase();
+  const encoded = `*${textValue}*`;
+  const wideFactor = 2.5;
+  const modules = estimateCode39Modules(value, wideFactor);
+  const textGapMm = 1.5;
+  const textGapPx = textGapMm * pxPerMm;
+  const fontPx = Math.max(9, Math.round(6 * pxPerMm * 1.25));
+
+  ctx2d.save();
+  ctx2d.font = `${fontPx}px Arial`;
+  ctx2d.fillStyle = '#000';
+  const textWidthPx = ctx2d.measureText(textValue).width;
+  const availableBarcodeWidthMm = Math.max(8, placement.maxWidthMm - textGapMm - (textWidthPx / pxPerMm));
+  const moduleWidthMm = Math.max(0.18, Math.min(0.6, availableBarcodeWidthMm / Math.max(1, modules)));
+  const moduleWidthPx = moduleWidthMm * pxPerMm;
+  const barcodeWidthPx = modules * moduleWidthPx;
+  const totalWidthPx = barcodeWidthPx + textGapPx + textWidthPx;
+  const startXPx = placement.xMm * pxPerMm + Math.max(0, ((placement.maxWidthMm * pxPerMm) - totalWidthPx) / 2);
+  const yPx = placement.yMm * pxPerMm;
+  const barHeightPx = placement.barHeightMm * pxPerMm;
+  let cursorX = startXPx;
+
+  for (let i = 0; i < encoded.length; i += 1) {
+    const pattern = CODE39_PATTERNS[encoded[i]] || CODE39_PATTERNS['*'];
+    for (let j = 0; j < pattern.length; j += 1) {
+      const widthPx = (pattern[j] === 'w' ? wideFactor : 1) * moduleWidthPx;
+      const isBar = j % 2 === 0;
+      if (isBar) {
+        ctx2d.fillRect(cursorX, yPx, widthPx, barHeightPx);
+      }
+      cursorX += widthPx;
+    }
+    if (i < encoded.length - 1) {
+      cursorX += moduleWidthPx;
+    }
+  }
+
+  const textX = startXPx + barcodeWidthPx + textGapPx;
+  const textY = yPx + barHeightPx * 0.78;
+  ctx2d.fillText(textValue, textX, textY);
+  ctx2d.restore();
+}
+
+function drawPlacementPhotoOnCanvas(ctx2d, item, drawOffsetX, drawOffsetY, pxPerMm) {
+  const imageRect = getPlacementImageRectMm(item);
+  const crop = getCropPixels(item);
+
+  const frameX = (item.xMm + drawOffsetX) * pxPerMm;
+  const frameY = (item.yMm + drawOffsetY) * pxPerMm;
+  const frameW = item.widthMm * pxPerMm;
+  const frameH = item.heightMm * pxPerMm;
+
+  ctx2d.fillStyle = '#fff';
+  ctx2d.fillRect(frameX, frameY, frameW, frameH);
+
+  const dx = (item.xMm + imageRect.xMm + drawOffsetX) * pxPerMm;
+  const dy = (item.yMm + imageRect.yMm + drawOffsetY) * pxPerMm;
+  const dw = imageRect.widthMm * pxPerMm;
+  const dh = imageRect.heightMm * pxPerMm;
+
+  ctx2d.save();
+  ctx2d.imageSmoothingEnabled = true;
+  ctx2d.imageSmoothingQuality = 'high';
+
+  if (!item.rotated) {
+    ctx2d.drawImage(item.image, crop.sx, crop.sy, crop.sw, crop.sh, dx, dy, dw, dh);
+  } else {
+    ctx2d.translate(dx + dw, dy);
+    ctx2d.rotate(Math.PI / 2);
+    ctx2d.drawImage(item.image, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, dh, dw);
+  }
+
+  ctx2d.restore();
+}
+
+async function renderPrintPageAsJpegBlob(page, geometry, barcodeId, dpi, iccProfileBytes) {
+  const pxPerMm = dpi / MM_PER_INCH;
+  const widthPx = Math.max(1, Math.round(geometry.widthMm * pxPerMm));
+  const heightPx = Math.max(1, Math.round(geometry.heightMm * pxPerMm));
+  const canvas = document.createElement('canvas');
+  canvas.width = widthPx;
+  canvas.height = heightPx;
+
+  const ctx2d = canvas.getContext('2d');
+  ctx2d.fillStyle = '#fff';
+  ctx2d.fillRect(0, 0, widthPx, heightPx);
+
+  const drawOffsetX = geometry.offsetX;
+  const drawOffsetY = geometry.offsetY;
+
+  for (const item of page) {
+    if (!item.dataUrl) continue;
+    drawPlacementPhotoOnCanvas(ctx2d, item, drawOffsetX, drawOffsetY, pxPerMm);
+  }
+
+  ctx2d.fillStyle = '#000';
+  for (const reg of geometry.regmarks) {
+    const cx = (reg.cx + drawOffsetX) * pxPerMm;
+    const cy = (reg.cy + drawOffsetY) * pxPerMm;
+    const r = reg.r * pxPerMm;
+    ctx2d.beginPath();
+    ctx2d.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx2d.fill();
+  }
+
+  if (barcodeId) {
+    const contentTopY = Math.min(...page.map((item) => item.yMm)) + drawOffsetY;
+    const contentBottomY = Math.max(...page.map((item) => item.yMm + item.heightMm)) + drawOffsetY;
+    const placement = getBarcodePlacementMm(
+      geometry.regmarks.map((reg) => ({
+        cx: reg.cx + drawOffsetX,
+        cy: reg.cy + drawOffsetY,
+        r: reg.r
+      })),
+      geometry,
+      { topY: contentTopY, bottomY: contentBottomY }
+    );
+    drawCode39BarcodeOnCanvas(ctx2d, barcodeId, placement, pxPerMm);
+  }
+
+  const jpegBlob = await canvasToJpegBlob(canvas, 0.98);
+  const jpegBytes = await blobToBytes(jpegBlob);
+  const withProfile = embedIccProfileIntoJpegBytes(jpegBytes, iccProfileBytes);
+  return new Blob([withProfile], { type: 'image/jpeg' });
+}
+
+async function buildPrintJpegExports(barcodeId) {
+  if (state.pages.length === 0) {
+    setStatus('Kein Layout zum Exportieren vorhanden.');
+    return null;
+  }
+
+  const config = getConfig();
+  const dpi = Number(config.dpi) || 300;
+  const pageGeometries = state.pages.map((page) => getPdfPageGeometry(page, config));
+  const files = [];
+  const profileSources = new Set();
+
+  for (let index = 0; index < state.pages.length; index += 1) {
+    const page = state.pages[index];
+    const geometry = pageGeometries[index];
+    const profile = await resolveIccProfileForPage(page);
+    profileSources.add(profile.source);
+
+    const blob = await renderPrintPageAsJpegBlob(page, geometry, barcodeId, dpi, profile.bytes);
+    const pageNo = String(index + 1).padStart(2, '0');
+    files.push({
+      name: `druck_motive_regmarks_${barcodeId}_seite-${pageNo}.jpg`,
+      blob
+    });
+  }
+
+  return {
+    files,
+    profileSources
+  };
+}
+
+function buildPdfDocument(includePhotos, barcodeId) {
   if (!window.jspdf || !window.jspdf.jsPDF) {
-    setStatus('PDF-Bibliothek lokal nicht gefunden. Bitte im Projektordner einmal npm install ausfuehren.');
     return null;
   }
 
@@ -1678,45 +2976,79 @@ function buildPdfDocument(includePhotos) {
 
   const config = getConfig();
   const { jsPDF } = window.jspdf;
-  const pageHeights = state.pages.map((page) => getEffectivePageHeightMm(page, config));
-  const firstPageHeight = pageHeights[0];
+  const pageGeometries = state.pages.map((page) => getPdfPageGeometry(page, config));
+  const firstGeometry = pageGeometries[0];
+  const firstOrientation = firstGeometry.widthMm >= firstGeometry.heightMm ? 'landscape' : 'portrait';
 
   const pdf = new jsPDF({
+    orientation: firstOrientation,
     unit: 'mm',
-    format: [config.rollWidth, firstPageHeight],
+    format: [firstGeometry.widthMm, firstGeometry.heightMm],
     compress: false,
     precision: 12
   });
 
   state.pages.forEach((page, index) => {
-    const pageHeight = pageHeights[index];
+    const geometry = pageGeometries[index];
+    const pageHeight = geometry.contentHeightMm;
+    const drawOffsetX = geometry.offsetX;
+    const drawOffsetY = geometry.offsetY;
+    const pageOrientation = geometry.widthMm >= geometry.heightMm ? 'landscape' : 'portrait';
+
     if (index > 0) {
-      pdf.addPage([config.rollWidth, pageHeight], 'portrait');
+      pdf.addPage([geometry.widthMm, geometry.heightMm], pageOrientation);
       pdf.setPage(index + 1);
     }
 
     pdf.setFillColor(255, 255, 255);
-    pdf.rect(0, 0, config.rollWidth, pageHeight, 'F');
+    pdf.rect(0, 0, geometry.widthMm, geometry.heightMm, 'F');
 
     for (const item of page) {
       if (includePhotos && item.dataUrl) {
         const source = buildPlacementImageDataUrl(item);
         const format = getImageFormatFromDataUrl(source);
-        pdf.addImage(source, format, item.xMm, item.yMm, item.widthMm, item.heightMm, undefined, 'NONE');
+        const imageRect = getPlacementImageRectMm(item);
+        pdf.setFillColor(255, 255, 255);
+        pdf.rect(item.xMm + drawOffsetX, item.yMm + drawOffsetY, item.widthMm, item.heightMm, 'F');
+        pdf.addImage(
+          source,
+          format,
+          item.xMm + imageRect.xMm + drawOffsetX,
+          item.yMm + imageRect.yMm + drawOffsetY,
+          imageRect.widthMm,
+          imageRect.heightMm,
+          undefined,
+          'NONE'
+        );
       }
 
       if (!includePhotos) {
         pdf.setDrawColor(0, 255, 0);
         pdf.setLineWidth(0.25 * MM_PER_POINT);
-        pdf.rect(item.xMm, item.yMm, item.widthMm, item.heightMm);
+        pdf.rect(item.xMm + drawOffsetX, item.yMm + drawOffsetY, item.widthMm, item.heightMm);
       }
 
       // Regmarks werden jetzt pro Bogen gezeichnet (außen)
     }
     // Regmarks für den Bogen (außen)
-    for (const reg of getSheetRegmarks(page, config, pageHeight)) {
+    for (const reg of geometry.regmarks) {
       pdf.setFillColor(0, 0, 0);
-      pdf.circle(reg.cx, reg.cy, reg.r, 'F');
+      pdf.circle(reg.cx + drawOffsetX, reg.cy + drawOffsetY, reg.r, 'F');
+    }
+
+    if (barcodeId) {
+      const contentTopY = Math.min(...page.map((item) => item.yMm)) + drawOffsetY;
+      const contentBottomY = Math.max(...page.map((item) => item.yMm + item.heightMm)) + drawOffsetY;
+      const placement = getBarcodePlacementMm(
+        geometry.regmarks.map((reg) => ({
+          cx: reg.cx + drawOffsetX,
+          cy: reg.cy + drawOffsetY,
+          r: reg.r
+        })),
+        geometry,
+        { topY: contentTopY, bottomY: contentBottomY }
+      );
+      drawCode39BarcodeOnPdf(pdf, barcodeId, placement);
     }
   });
 
@@ -1732,13 +3064,41 @@ function downloadBlob(filename, blob) {
   URL.revokeObjectURL(url);
 }
 
-function exportPdf(includePhotos) {
-  const pdf = buildPdfDocument(includePhotos);
+async function exportPdf(includePhotos) {
+  if (includePhotos) {
+    const barcodeId = getOrCreateExportBarcodeId();
+    try {
+      const printExport = await buildPrintJpegExports(barcodeId);
+      if (!printExport) return;
+      for (const file of printExport.files) {
+        downloadBlob(file.name, file.blob);
+      }
+
+      const usedFallback = Array.from(printExport.profileSources).some((source) => source.startsWith('fallback'));
+      setStatus(
+        usedFallback
+          ? `Druck-JPEG exportiert (${printExport.files.length} Datei(en), Fallback-Profil Adobe RGB aktiv, Code: ${barcodeId}).`
+          : `Druck-JPEG exportiert (${printExport.files.length} Datei(en), Profil aus Import uebernommen, Code: ${barcodeId}).`
+      );
+    } catch (error) {
+      setStatus(`Druck-JPEG Export fehlgeschlagen: ${error.message}`);
+    }
+    return;
+  }
+
+  const available = await ensureJsPdfLoaded();
+  if (!available) {
+    setStatus('PDF-Bibliothek nicht verfuegbar. Bitte Internetverbindung aktivieren oder lokal via npm install bereitstellen.');
+    return;
+  }
+
+  const barcodeId = getOrCreateExportBarcodeId();
+  const pdf = buildPdfDocument(false, barcodeId);
   if (!pdf) return;
-  const filename = includePhotos ? 'druck_motive_regmarks.pdf' : 'kontur_regmarks.pdf';
+  const filename = `${barcodeId}.pdf`;
   const blob = pdf.output('blob');
   downloadBlob(filename, blob);
-  setStatus(includePhotos ? 'Druck-PDF exportiert.' : 'Kontur-PDF exportiert.');
+  setStatus(`Kontur-PDF exportiert: ${filename}`);
 }
 
 async function exportToHotfolder() {
@@ -1752,16 +3112,26 @@ async function exportToHotfolder() {
     return;
   }
 
-  const printPdf = buildPdfDocument(true);
-  const contourPdf = buildPdfDocument(false);
-  if (!printPdf || !contourPdf) return;
+  const available = await ensureJsPdfLoaded();
+  if (!available) {
+    setStatus('PDF-Bibliothek nicht verfuegbar. Bitte Internetverbindung aktivieren oder lokal via npm install bereitstellen.');
+    return;
+  }
+
+  const barcodeId = getOrCreateExportBarcodeId();
+  const printJpegs = await buildPrintJpegExports(barcodeId);
+  const contourPdf = buildPdfDocument(false, barcodeId);
+  if (!printJpegs || !contourPdf) return;
 
   try {
     const dir = await window.showDirectoryPicker();
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const files = [
-      { name: `druck_motive_regmarks_${stamp}.pdf`, blob: printPdf.output('blob') },
-      { name: `kontur_regmarks_${stamp}.pdf`, blob: contourPdf.output('blob') }
+      ...printJpegs.files.map((entry) => ({
+        name: `${entry.name.replace('.jpg', '')}_${stamp}.jpg`,
+        blob: entry.blob
+      })),
+      { name: `${barcodeId}.pdf`, blob: contourPdf.output('blob') }
     ];
 
     for (const file of files) {
@@ -1771,7 +3141,12 @@ async function exportToHotfolder() {
       await writable.close();
     }
 
-    setStatus('Hotfolder-Export abgeschlossen (2 PDF-Dateien geschrieben).');
+    const usedFallback = Array.from(printJpegs.profileSources).some((source) => source.startsWith('fallback'));
+    setStatus(
+      usedFallback
+        ? `Hotfolder-Export abgeschlossen (${files.length} Dateien geschrieben, Druck als JPEG mit Adobe-RGB-Fallback, Kontur: ${barcodeId}.pdf).`
+        : `Hotfolder-Export abgeschlossen (${files.length} Dateien geschrieben, Druck als JPEG mit uebernommenem Import-Profil, Kontur: ${barcodeId}.pdf).`
+    );
   } catch (error) {
     setStatus(`Hotfolder-Export abgebrochen/fehlgeschlagen: ${error.message}`);
   }
@@ -1779,13 +3154,16 @@ async function exportToHotfolder() {
 
 async function handlePhotoInput(files) {
   const dpi = Number(dpiInput.value) || 300;
+  const config = getConfig();
   const loaded = [];
   let skipped = 0;
 
   for (const file of files) {
     try {
+      const fileBytes = new Uint8Array(await file.arrayBuffer());
       const dataUrl = await fileToDataURL(file);
       const image = await loadImage(dataUrl);
+      const iccProfileBytes = extractIccProfileFromFileBytes(file, fileBytes);
 
       loaded.push({
         id: crypto.randomUUID(),
@@ -1794,8 +3172,14 @@ async function handlePhotoInput(files) {
         pixelHeight: image.naturalHeight,
         originalWidthMm: pxToMm(image.naturalWidth, dpi),
         originalHeightMm: pxToMm(image.naturalHeight, dpi),
+        targetWidthMm: pxToMm(image.naturalWidth, dpi),
+        targetHeightMm: pxToMm(image.naturalHeight, dpi),
+        whiteBorderMm: 0,
+        whiteBorderMode: 'outside',
+        sizeOverrideSource: null,
         image,
         dataUrl,
+        iccProfileBytes,
         thumbnailDataUrl: buildThumbnailDataUrl(image),
         cropNorm: { x: 0, y: 0, w: 1, h: 1 }
       });
@@ -1805,43 +3189,57 @@ async function handlePhotoInput(files) {
   }
 
   if (loaded.length === 0) {
-    state.photos = [];
-    state.pages = [];
-    state.listSelection.clear();
-    state.selectedId = null;
-    state.currentPage = 0;
-    selectedItemInput.value = 'Keins';
-    renderTable();
-    drawPreview();
-    setStatus('Keine lesbaren Bilddateien geladen. Bitte JPG/PNG/WebP pruefen.');
+    setStatus('Keine neuen lesbaren Bilddateien geladen. Bestehende Liste bleibt unveraendert.');
     return;
   }
 
-  state.photos = loaded;
-  state.pages = [];
-  state.listSelection.clear();
-  state.selectedId = null;
-  state.currentPage = 0;
-  selectedItemInput.value = 'Keins';
-  hideManualMenu();
+  const previousCount = state.photos.length;
+  state.photos = [...state.photos, ...loaded];
+  refreshPhotoSizing(config);
+
+  if (state.selectedId && !getPhotoById(state.selectedId)) {
+    state.selectedId = null;
+    setSelectedItemName('Keins');
+    hideManualMenu();
+  }
+
   renderTable();
   drawPreview();
+
+  const added = state.photos.length - previousCount;
   if (skipped > 0) {
-    setStatus(`${loaded.length} Fotos geladen, ${skipped} Datei(en) konnten nicht gelesen werden.`);
+    setStatus(`${added} Foto(s) hinzugefuegt, ${skipped} Datei(en) konnten nicht gelesen werden.`);
   } else {
-    setStatus(`${loaded.length} Fotos geladen. Starte nun das Nesting.`);
+    setStatus(`${added} Foto(s) zur Liste hinzugefuegt.`);
+  }
+}
+
+async function loadStartupTestPhoto() {
+  if (state.photos.length > 0) return;
+
+  try {
+    const response = await fetch('./assets/fuji.jpg', { cache: 'no-store' });
+    if (!response.ok) return;
+
+    const blob = await response.blob();
+    const file = new File([blob], 'fuji.jpg', { type: blob.type || 'image/jpeg' });
+    await handlePhotoInput([file]);
+  } catch (error) {
+    console.warn('Startbild konnte nicht geladen werden:', error);
   }
 }
 
 function runNesting() {
   const config = getConfig();
+  refreshPhotoSizing(config);
   const result = nestAllPages(state.photos, config);
 
   state.pages = result.pages;
+  invalidateExportBarcodeId();
   state.listSelection.clear();
   state.currentPage = 0;
   state.selectedId = null;
-  selectedItemInput.value = 'Keins';
+  setSelectedItemName('Keins');
   hideManualMenu();
 
   renderTable();
@@ -1860,11 +3258,28 @@ function selectPlacementById(id) {
   state.selectedId = id;
   const item = getSelectedPlacement();
   const photo = getPhotoById(id);
-  selectedItemInput.value = item ? item.name : (photo ? photo.name : 'Keins');
+  const displayName = item ? item.name : (photo ? photo.name : 'Keins');
+  setSelectedItemName(displayName);
+  
+  const header = document.getElementById('manualMenuHeader');
+  if (header && item) {
+    header.textContent = item.name || 'Menü';
+  }
+  
   updateManualScaleControlsForSelected();
+  updateOversizeEditor();
   if (!id) hideManualMenu();
   updatePhotoCardSelection();
   drawPreview();
+}
+
+function selectPlacementByIdWithMenuPosition(id) {
+  selectPlacementById(id);
+  if (!id) return;
+  
+  if (manualNestingMenu && !manualNestingMenu.hidden) {
+    positionManualMenuOutsidePreview();
+  }
 }
 
 function moveSelected(dx, dy) {
@@ -1879,7 +3294,7 @@ function moveSelected(dx, dy) {
   const candidate = { ...selected, xMm: selected.xMm + dx, yMm: selected.yMm + dy };
 
   const snapped = findNearestFreePlacement(candidate, page, config, selected.id, {
-    maxRadiusMm: Math.max(120, Number(moveStepInput.value || 0) * 20),
+    maxRadiusMm: Math.max(120, getMoveStepMm() * 20),
     angleSamples: 20
   });
   if (!snapped) {
@@ -1927,6 +3342,11 @@ function rotateSelected() {
   selected.widthMm = snapped.widthMm;
   selected.heightMm = snapped.heightMm;
   selected.rotated = snapped.rotated;
+  if (Number(selected.contentWidthMm) > 0 && Number(selected.contentHeightMm) > 0) {
+    const prevContentWidth = selected.contentWidthMm;
+    selected.contentWidthMm = selected.contentHeightMm;
+    selected.contentHeightMm = prevContentWidth;
+  }
   drawPreview();
   setStatus(`${selected.name} rotiert.`);
 }
@@ -1979,7 +3399,7 @@ function unplaceSelected() {
   }
 
   state.selectedId = null;
-  selectedItemInput.value = 'Keins';
+  setSelectedItemName('Keins');
   renderTable();
   drawPreview();
   setStatus(`${selected.name} zurueck in die Liste gelegt.`);
@@ -1998,6 +3418,11 @@ function saveProject() {
       pixelHeight: photo.pixelHeight,
       originalWidthMm: photo.originalWidthMm,
       originalHeightMm: photo.originalHeightMm,
+      targetWidthMm: photo.targetWidthMm,
+      targetHeightMm: photo.targetHeightMm,
+      whiteBorderMm: photo.whiteBorderMm || 0,
+      whiteBorderMode: photo.whiteBorderMode || 'outside',
+      sizeOverrideSource: photo.sizeOverrideSource || null,
       dataUrl: photo.dataUrl,
       cropNorm: photo.cropNorm || { x: 0, y: 0, w: 1, h: 1 }
     })),
@@ -2035,8 +3460,14 @@ async function loadProjectFromFile(file) {
       pixelHeight: p.pixelHeight,
       originalWidthMm: p.originalWidthMm,
       originalHeightMm: p.originalHeightMm,
+      targetWidthMm: p.targetWidthMm,
+      targetHeightMm: p.targetHeightMm,
+      whiteBorderMm: p.whiteBorderMm || 0,
+      whiteBorderMode: p.whiteBorderMode || 'outside',
+      sizeOverrideSource: p.sizeOverrideSource || null,
       dataUrl: p.dataUrl,
       image,
+      iccProfileBytes: extractIccProfileFromDataUrl(p.dataUrl),
       thumbnailDataUrl: buildThumbnailDataUrl(image),
       cropNorm: p.cropNorm || { x: 0, y: 0, w: 1, h: 1 }
     });
@@ -2063,11 +3494,13 @@ async function loadProjectFromFile(file) {
   }
 
   state.photos = photos;
+  invalidateExportBarcodeId();
+  refreshPhotoSizing(getConfig());
   state.pages = pages;
   state.listSelection.clear();
   state.currentPage = Math.min(Math.max(0, project.currentPage || 0), Math.max(0, pages.length - 1));
   state.selectedId = null;
-  selectedItemInput.value = 'Keins';
+  setSelectedItemName('Keins');
   hideManualMenu();
 
   renderTable();
@@ -2078,10 +3511,11 @@ async function loadProjectFromFile(file) {
 function clearAll() {
   state.photos = [];
   state.pages = [];
+  invalidateExportBarcodeId();
   state.listSelection.clear();
   state.selectedId = null;
   state.currentPage = 0;
-  selectedItemInput.value = 'Keins';
+  setSelectedItemName('Keins');
   hideManualMenu();
   photoInput.value = '';
   projectLoadInput.value = '';
@@ -2100,7 +3534,7 @@ function goToPage(index) {
 
   state.currentPage = Math.min(Math.max(0, index), state.pages.length - 1);
   state.selectedId = null;
-  selectedItemInput.value = 'Keins';
+  setSelectedItemName('Keins');
   hideManualMenu();
   drawPreview();
 }
@@ -2163,33 +3597,72 @@ function hideManualMenu() {
   }
 }
 
+function positionManualMenuOutsidePreview() {
+  if (!manualNestingMenu || manualNestingMenu.hidden) return;
+
+  const canvasRect = previewCanvas?.getBoundingClientRect();
+  const menuWidth = manualNestingMenu.offsetWidth || 300;
+  const menuHeight = manualNestingMenu.offsetHeight || 280;
+  const padding = 16;
+
+  let x = window.innerWidth / 2 - menuWidth / 2;
+  let y = window.innerHeight / 2 - menuHeight / 2;
+
+  const selected = getSelectedPlacement();
+  const config = getConfig();
+  if (canvasRect && selected) {
+    const { pad, scale } = getCanvasTransform(config);
+    const sx = previewCanvas.width / Math.max(1, canvasRect.width);
+    const sy = previewCanvas.height / Math.max(1, canvasRect.height);
+
+    const itemX = pad + selected.xMm * scale;
+    const itemY = pad + selected.yMm * scale;
+    const itemW = selected.widthMm * scale;
+    const itemH = selected.heightMm * scale;
+
+    const itemLeft = canvasRect.left + itemX / sx;
+    const itemTop = canvasRect.top + itemY / sy;
+    const itemRight = canvasRect.left + (itemX + itemW) / sx;
+    const itemBottom = canvasRect.top + (itemY + itemH) / sy;
+
+    x = itemRight + 12;
+    y = itemTop;
+
+    if (x + menuWidth + padding > window.innerWidth) {
+      x = itemLeft - menuWidth - 12;
+    }
+
+    if (x < padding) {
+      x = itemLeft;
+      y = itemBottom + 12;
+    }
+
+    if (y + menuHeight + padding > window.innerHeight) {
+      y = itemBottom - menuHeight;
+    }
+  } else if (canvasRect) {
+    x = canvasRect.right + padding;
+    y = canvasRect.top + padding;
+  }
+
+  x = Math.max(padding, Math.min(x, window.innerWidth - menuWidth - padding));
+  y = Math.max(padding, Math.min(y, window.innerHeight - menuHeight - padding));
+
+  manualNestingMenu.style.left = x + 'px';
+  manualNestingMenu.style.top = y + 'px';
+}
+
 function showManualMenuAtCanvasEvent(event) {
   if (!manualNestingMenu) return;
 
-  const canvasRect = previewCanvas.getBoundingClientRect();
-  const parent = manualNestingMenu.offsetParent instanceof HTMLElement
-    ? manualNestingMenu.offsetParent
-    : previewCanvas.parentElement;
-  if (!parent) return;
-
-  const parentRect = parent.getBoundingClientRect();
-  let left = event.clientX - parentRect.left + 10;
-  let top = event.clientY - parentRect.top + 10;
+  const selected = getSelectedPlacement();
+  const header = document.getElementById('manualMenuHeader');
+  if (header && selected) {
+    header.textContent = selected.name || 'Menü';
+  }
 
   manualNestingMenu.hidden = false;
-  const menuWidth = manualNestingMenu.offsetWidth;
-  const menuHeight = manualNestingMenu.offsetHeight;
-
-  const minLeft = canvasRect.left - parentRect.left + 8;
-  const maxLeft = canvasRect.right - parentRect.left - menuWidth - 8;
-  const minTop = canvasRect.top - parentRect.top + 8;
-  const maxTop = canvasRect.bottom - parentRect.top - menuHeight - 8;
-
-  left = Math.min(Math.max(left, minLeft), Math.max(minLeft, maxLeft));
-  top = Math.min(Math.max(top, minTop), Math.max(minTop, maxTop));
-
-  manualNestingMenu.style.left = `${left}px`;
-  manualNestingMenu.style.top = `${top}px`;
+  positionManualMenuOutsidePreview();
 }
 
 photoInput.addEventListener('change', async (event) => {
@@ -2197,26 +3670,38 @@ photoInput.addEventListener('change', async (event) => {
   if (files.length === 0) return;
 
   try {
-    await handlePhotoInput(files);
+    await withBusyOverlay('Motive werden geladen ...', async () => {
+      await handlePhotoInput(files);
+    });
   } catch (error) {
     setStatus(`Fehler beim Laden: ${error.message}`);
   }
 });
 
-nestBtn.addEventListener('click', () => {
+nestBtn.addEventListener('click', async () => {
   if (state.photos.length === 0) {
     setStatus('Bitte zuerst Fotos laden.');
     return;
   }
-  runNesting();
+  await withBusyOverlay('Motive werden platziert ...', async () => {
+    runNesting();
+  });
 });
 
 if (nestPageBtn) {
-  nestPageBtn.addEventListener('click', () => nestCurrentPage());
+  nestPageBtn.addEventListener('click', async () => {
+    await withBusyOverlay('Aktueller Bogen wird neu genestet ...', async () => {
+      nestCurrentPage();
+    });
+  });
 }
 
 if (placeSelectionBtn) {
-  placeSelectionBtn.addEventListener('click', () => placeListSelectionOnCurrentPage());
+  placeSelectionBtn.addEventListener('click', async () => {
+    await withBusyOverlay('Auswahl wird platziert ...', async () => {
+      placeListSelectionOnCurrentPage();
+    });
+  });
 }
 
 if (deleteSelectionBtn) {
@@ -2260,7 +3745,7 @@ previewCanvas.addEventListener('click', (event) => {
   const { px, py } = canvasEventToMm(event, config);
   const item = findItemAtCanvasPoint(px, py, page, config);
   if (item) {
-    selectPlacementById(item.id);
+    selectPlacementByIdWithMenuPosition(item.id);
     showManualMenuAtCanvasEvent(event);
     return;
   }
@@ -2327,8 +3812,6 @@ previewCanvas.addEventListener('mouseup', stopDrag);
 previewCanvas.addEventListener('mouseleave', stopDrag);
 
 previewCanvas.addEventListener('dragover', (event) => {
-  const id = event.dataTransfer?.getData('text/photo-id');
-  if (!id) return;
   event.preventDefault();
   previewCanvas.classList.add('drop-active');
 });
@@ -2338,7 +3821,7 @@ previewCanvas.addEventListener('dragleave', () => {
 });
 
 previewCanvas.addEventListener('drop', (event) => {
-  const id = event.dataTransfer?.getData('text/photo-id');
+  const id = event.dataTransfer?.getData('text/photo-id') || event.dataTransfer?.getData('text/plain');
   previewCanvas.classList.remove('drop-active');
   if (!id) return;
   event.preventDefault();
@@ -2351,7 +3834,7 @@ previewCanvas.addEventListener('drop', (event) => {
     return;
   }
 
-  selectPlacementById(id);
+  selectPlacementById(placed.id);
   renderTable();
   drawPreview();
   const photo = getPhotoById(id);
@@ -2370,35 +3853,24 @@ if (menuUnplaceBtn) {
   menuUnplaceBtn.addEventListener('click', () => unplaceSelected());
 }
 
-if (menuLeftBtn) {
-  menuLeftBtn.addEventListener('click', () => moveSelected(-Number(moveStepInput.value || 0), 0));
-}
-
-if (menuRightBtn) {
-  menuRightBtn.addEventListener('click', () => moveSelected(Number(moveStepInput.value || 0), 0));
-}
-
-if (menuUpBtn) {
-  menuUpBtn.addEventListener('click', () => moveSelected(0, -Number(moveStepInput.value || 0)));
-}
-
-if (menuDownBtn) {
-  menuDownBtn.addEventListener('click', () => moveSelected(0, Number(moveStepInput.value || 0)));
-}
-
-if (menuShowImageBtn) {
-  menuShowImageBtn.addEventListener('click', () => {
-    const selected = getSelectedPlacement();
-    if (selected) openPhotoOverlay(selected);
-  });
-}
-
 if (menuCropBtn) {
   menuCropBtn.addEventListener('click', () => openCropOverlayForSelected());
 }
 
-if (menuApplyScaleBtn) {
-  menuApplyScaleBtn.addEventListener('click', () => applyScaleToSelected());
+if (menuApplyBtn) {
+  menuApplyBtn.addEventListener('click', () => {
+    // Save white border values before they get overwritten by applyScaleToSelected
+    const savedBorderMm = Number(menuWhiteBorderMm?.value || 0);
+    const savedBorderMode = menuWhiteBorderMode?.value || 'outside';
+    
+    applyScaleToSelected();
+    
+    // Restore white border values from before scale was applied
+    if (menuWhiteBorderMm) menuWhiteBorderMm.value = savedBorderMm.toFixed(1);
+    if (menuWhiteBorderMode) menuWhiteBorderMode.value = savedBorderMode;
+    
+    applyWhiteBorderToSelected();
+  });
 }
 
 if (menuScaleWidthCm) {
@@ -2412,6 +3884,12 @@ if (menuScaleHeightCm) {
   menuScaleHeightCm.addEventListener('input', () => {
     manualScaleLastEdited = 'height';
     syncScaleInputsByRatio('height');
+  });
+}
+
+if (menuScaleDpi) {
+  menuScaleDpi.addEventListener('input', () => {
+    updateSizeFromDpi();
   });
 }
 
@@ -2558,13 +4036,17 @@ if (cropOverlayCanvas) {
 
     if (cropEditor.dragMode === 'resize' && cropEditor.activeHandle && cropEditor.resizeAnchor) {
       const pointerPx = canvasToImagePoint(selected, x, y);
-      cropEditor.rect = buildRectFromHandleDrag(
+      let nextRect = buildRectFromHandleDrag(
         cropEditor.activeHandle,
         cropEditor.resizeAnchor,
         pointerPx,
         iw,
         ih
       );
+      if (isCropRatioLocked() && cropEditor.lockedAspect > 0) {
+        nextRect = fitRectToAspect(nextRect, cropEditor.lockedAspect);
+      }
+      cropEditor.rect = clampCropRect(nextRect, iw, ih);
     } else if (cropEditor.dragMode === 'move') {
       const nx = ((x - cropEditor.dragOffsetX - d.x) / d.w) * iw;
       const ny = ((y - cropEditor.dragOffsetY - d.y) / d.h) * ih;
@@ -2652,6 +4134,24 @@ if (cropRatioW) {
   cropRatioW.addEventListener('input', () => applyCropRatioFromInputs());
 }
 
+if (cropLockRatio) {
+  cropLockRatio.addEventListener('change', () => {
+    if (!cropEditor.active) {
+      syncCropRatioLockUi();
+      return;
+    }
+
+    if (isCropRatioLocked()) {
+      cropEditor.lockedAspect = cropEditor.rect.w / Math.max(1e-6, cropEditor.rect.h);
+      updateCropAspectFromInputs(null);
+    }
+
+    syncCropRatioLockUi();
+    updateCropRectInputs();
+    updateCropOverlayDpiInfo();
+  });
+}
+
 if (cropOverlayApplyBtn) {
   cropOverlayApplyBtn.addEventListener('click', () => applyCropOverlay());
 }
@@ -2671,13 +4171,60 @@ if (cropOverlay) {
 
 closePhotoOverlay();
 
-rotateBtn.addEventListener('click', rotateSelected);
-unplaceBtn.addEventListener('click', unplaceSelected);
-duplicateBtn.addEventListener('click', duplicateSelected);
-moveLeftBtn.addEventListener('click', () => moveSelected(-Number(moveStepInput.value || 0), 0));
-moveRightBtn.addEventListener('click', () => moveSelected(Number(moveStepInput.value || 0), 0));
-moveUpBtn.addEventListener('click', () => moveSelected(0, -Number(moveStepInput.value || 0)));
-moveDownBtn.addEventListener('click', () => moveSelected(0, Number(moveStepInput.value || 0)));
+[rollWidthInput, maxHeightInput, paddingInput, allowRotateInput, dpiInput].forEach((input) => {
+  input?.addEventListener('change', () => {
+    refreshPhotoSizing(getConfig());
+    renderTable();
+    drawPreview();
+  });
+});
+
+if (oversizeWidthCmInput) {
+  oversizeWidthCmInput.addEventListener('click', (event) => {
+    event.stopPropagation();
+  });
+}
+
+if (oversizeApplyBtn) {
+  oversizeApplyBtn.addEventListener('click', async () => {
+    const selectedPhoto = state.selectedId ? getPhotoById(state.selectedId) : null;
+    if (!selectedPhoto) {
+      setStatus('Bitte zuerst ein Motiv auswaehlen.');
+      return;
+    }
+    const widthCm = Number(oversizeWidthCmInput?.value || 0);
+    if (!Number.isFinite(widthCm) || widthCm <= 0) {
+      setStatus('Bitte eine gueltige Breite eingeben.');
+      return;
+    }
+
+    setPhotoTargetWidthMm(selectedPhoto, widthCm * MM_PER_CM, 'manual');
+    renderTable();
+    drawPreview();
+
+    if (state.pages.length > 0) {
+      await withBusyOverlay('Layout wird mit neuer Motivgroesse neu berechnet ...', async () => {
+        runNesting();
+      });
+    }
+  });
+}
+
+resizePreviewCanvas();
 
 renderTable();
 drawPreview();
+
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    positionManualMenuOutsidePreview();
+  }, 100);
+});
+
+window.addEventListener('resize', () => {
+  if (manualNestingMenu && !manualNestingMenu.hidden) {
+    positionManualMenuOutsidePreview();
+  }
+});
+
+void loadStartupTestPhoto();
