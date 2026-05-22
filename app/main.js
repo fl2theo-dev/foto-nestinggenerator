@@ -28,6 +28,11 @@ function getSheetRegmarks(page, config, pageHeightMm = config.maxHeight) {
   ];
 }
 let jsPdfLoadPromise = null;
+const APP_BUILD_ID = 'ac6c351';
+
+if (typeof console !== 'undefined' && typeof console.info === 'function') {
+  console.info(`Foto NG Build: ${APP_BUILD_ID}`);
+}
 
 function ensureJsPdfLoaded() {
   if (window.jspdf && window.jspdf.jsPDF) {
