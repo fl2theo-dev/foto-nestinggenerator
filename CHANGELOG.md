@@ -2,6 +2,15 @@
 
 Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 
+## [0.3.5] - 2026-05-22
+
+### Changed
+
+- Export-UI vereinfacht: der separate Desktop-Button und das JPEG-Farbprofil-Dropdown wurden entfernt.
+- Der Hinweistext zur JPEG-Profil-Auswahl wurde aus der App entfernt.
+- Desktop-Standalone bleibt als installierbare App erhalten und wird mit der normalen UI ausgeliefert.
+- Build- und Versionsstand auf 0.3.5 angehoben.
+
 ## [0.3.4] - 2026-05-22
 
 ### Changed

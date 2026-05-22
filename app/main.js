@@ -959,10 +959,8 @@ const saveProjectBtn = document.getElementById('saveProjectBtn');
 const loadProjectBtn = document.getElementById('loadProjectBtn');
 const projectLoadInput = document.getElementById('projectLoadInput');
 const exportPrintPdfBtn = document.getElementById('exportPrintPdfBtn');
-const exportProductionDesktopBtn = document.getElementById('exportProductionDesktopBtn');
 const exportContourPdfBtn = document.getElementById('exportContourPdfBtn');
 const exportHotfolderBtn = document.getElementById('exportHotfolderBtn');
-const exportProfileMode = document.getElementById('exportProfileMode');
 const prevPageBtn = document.getElementById('prevPageBtn');
 const nextPageBtn = document.getElementById('nextPageBtn');
 const pageIndicator = document.getElementById('pageIndicator');
@@ -1083,8 +1081,6 @@ function parseUiNumber(value) {
 }
 
 function getPrintJpegProfilePolicy() {
-  const value = String(exportProfileMode?.value || DEFAULT_PRINT_JPEG_PROFILE_POLICY).toLowerCase();
-  if (value === 'srgb' || value === 'source' || value === 'none') return value;
   return DEFAULT_PRINT_JPEG_PROFILE_POLICY;
 }
 
@@ -4520,10 +4516,6 @@ projectLoadInput.addEventListener('change', async (event) => {
 });
 
 exportPrintPdfBtn.addEventListener('click', () => exportPdf(true));
-if (isDesktopRuntime() && exportProductionDesktopBtn) {
-  exportProductionDesktopBtn.hidden = false;
-  exportProductionDesktopBtn.addEventListener('click', exportDesktopProductionJpeg);
-}
 exportContourPdfBtn.addEventListener('click', () => exportPdf(false));
 exportHotfolderBtn.addEventListener('click', exportToHotfolder);
 

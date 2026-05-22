@@ -1,6 +1,6 @@
 {
   "name": "foto-nestinggenerator",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "main": "desktop/main.cjs",
   "private": true,
   "description": "Projekt fuer Foto-Nesting mit Versionierungs-Workflow",

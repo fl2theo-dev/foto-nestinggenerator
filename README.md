@@ -21,8 +21,8 @@ Projekt fuer automatisches Foto-Nesting auf Rollenmaterial mit Regmarks und dual
 
 ## Standalone-Desktop (empfohlen)
 
-Die App kann als Desktop-Anwendung gestartet werden und bietet dann zusaetzlich
-den nativen Button `Druckfertig (Desktop)` fuer einen robusteren Produktions-Export.
+Die App kann als Desktop-Anwendung gestartet werden und laeuft dann als
+installierbare Standalone-App mit den normalen Exportwegen aus der UI.
 
 ```bash
 npm run desktop:dev

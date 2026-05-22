@@ -1,6 +1,17 @@
 {
   "releases": [
     {
+      "version": "0.3.5",
+      "date": "2026-05-22",
+      "summary": "Export-UI verschlankt und Standalone-App finalisiert.",
+      "changes": [
+        "Separaten Desktop-Button aus der Export-UI entfernt und die Oberfläche auf den Standard-Workflow reduziert.",
+        "JPEG-Farbprofil-Dropdown und zugehoerigen Hinweistext aus der App entfernt.",
+        "Standalone-Desktop bleibt als installierbare App erhalten und wird mit der bereinigten UI ausgeliefert.",
+        "App- und Paketversion auf 0.3.5 angehoben."
+      ]
+    },
+    {
       "version": "0.3.4",
       "date": "2026-05-22",
       "summary": "Barcode-Suffix, Profilbeibehaltung und Zielgroessen-Weissrand erweitert.",
