@@ -19,6 +19,21 @@ Projekt fuer automatisches Foto-Nesting auf Rollenmaterial mit Regmarks und dual
 3. Optional: [docs/index.html](docs/index.html) fuer Konzept/Versionierung oeffnen.
 4. Aenderungen in kleinen Commits versionieren.
 
+## Standalone-Desktop (empfohlen)
+
+Die App kann als Desktop-Anwendung gestartet werden und bietet dann zusaetzlich
+den nativen Button `Druckfertig (Desktop)` fuer einen robusteren Produktions-Export.
+
+```bash
+npm run desktop:dev
+```
+
+Installer bauen (macOS/Windows/Linux):
+
+```bash
+npm run desktop:build
+```
+
 ## Neue Kernfunktionen
 
 - Mehrseiten-Nesting (automatische Verteilung auf Seite 1..n)

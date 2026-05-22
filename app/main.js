@@ -959,6 +959,7 @@ const saveProjectBtn = document.getElementById('saveProjectBtn');
 const loadProjectBtn = document.getElementById('loadProjectBtn');
 const projectLoadInput = document.getElementById('projectLoadInput');
 const exportPrintPdfBtn = document.getElementById('exportPrintPdfBtn');
+const exportProductionDesktopBtn = document.getElementById('exportProductionDesktopBtn');
 const exportContourPdfBtn = document.getElementById('exportContourPdfBtn');
 const exportHotfolderBtn = document.getElementById('exportHotfolderBtn');
 const exportProfileMode = document.getElementById('exportProfileMode');
@@ -1085,6 +1086,115 @@ function getPrintJpegProfilePolicy() {
   const value = String(exportProfileMode?.value || DEFAULT_PRINT_JPEG_PROFILE_POLICY).toLowerCase();
   if (value === 'srgb' || value === 'source' || value === 'none') return value;
   return DEFAULT_PRINT_JPEG_PROFILE_POLICY;
+}
+
+function isDesktopRuntime() {
+  return Boolean(window.desktopApi && typeof window.desktopApi.exportProductionJpeg === 'function');
+}
+
+function buildDesktopProductionJob(barcodeId, barcodeText) {
+  const config = getConfig();
+  const dpi = Number(config.dpi) || 300;
+  const pageGeometries = state.pages.map((page) => getPdfPageGeometry(page, config));
+
+  const pages = state.pages.map((page, index) => {
+    const geometry = pageGeometries[index];
+    const drawOffsetX = geometry.offsetX;
+    const drawOffsetY = geometry.offsetY;
+
+    const regmarks = geometry.regmarks.map((reg) => ({
+      cxMm: reg.cx + drawOffsetX,
+      cyMm: reg.cy + drawOffsetY,
+      rMm: reg.r
+    }));
+
+    const contentTopY = Math.min(...page.map((item) => item.yMm)) + drawOffsetY;
+    const contentBottomY = Math.max(...page.map((item) => item.yMm + item.heightMm)) + drawOffsetY;
+    const barcodePlacementMm = getBarcodePlacementMm(regmarks.map((r) => ({ cx: r.cxMm, cy: r.cyMm, r: r.rMm })), geometry, {
+      topY: contentTopY,
+      bottomY: contentBottomY
+    });
+
+    const items = page.map((item) => {
+      const imageRect = getPlacementImageRectMm(item);
+      const crop = getCropPixels(item);
+      return {
+        id: item.id,
+        name: item.name,
+        sourcePath: item.sourcePath || null,
+        rotated: Boolean(item.rotated),
+        cropPx: {
+          sx: Math.max(0, Math.round(crop.sx)),
+          sy: Math.max(0, Math.round(crop.sy)),
+          sw: Math.max(1, Math.round(crop.sw)),
+          sh: Math.max(1, Math.round(crop.sh))
+        },
+        drawMm: {
+          x: item.xMm + imageRect.xMm + drawOffsetX,
+          y: item.yMm + imageRect.yMm + drawOffsetY,
+          w: imageRect.widthMm,
+          h: imageRect.heightMm
+        }
+      };
+    });
+
+    return {
+      pageNumber: index + 1,
+      widthMm: geometry.widthMm,
+      heightMm: geometry.heightMm,
+      regmarks,
+      barcode: {
+        text: barcodeText,
+        xMm: barcodePlacementMm.xMm,
+        yMm: barcodePlacementMm.yMm,
+        maxWidthMm: barcodePlacementMm.maxWidthMm,
+        barHeightMm: barcodePlacementMm.barHeightMm
+      },
+      items
+    };
+  });
+
+  return {
+    barcodeId,
+    barcodeText,
+    dpi,
+    profileMode: getPrintJpegProfilePolicy(),
+    pages
+  };
+}
+
+async function exportDesktopProductionJpeg() {
+  if (!isDesktopRuntime()) {
+    setStatus('Desktop-Export ist nur in der Standalone-App verfuegbar.');
+    return;
+  }
+  if (state.pages.length === 0) {
+    setStatus('Kein Layout zum Exportieren vorhanden.');
+    return;
+  }
+
+  const missingSource = state.pages
+    .flat()
+    .find((item) => !item.sourcePath);
+  if (missingSource) {
+    setStatus(`Desktop-Export nicht moeglich: Quelle fehlt fuer ${missingSource.name}. Bitte Originaldatei neu laden.`);
+    return;
+  }
+
+  const barcodeId = getOrCreateExportBarcodeId();
+  const barcodeText = getBarcodeTextForRendering(barcodeId);
+  const job = buildDesktopProductionJob(barcodeId, barcodeText);
+
+  try {
+    const result = await window.desktopApi.exportProductionJpeg(job);
+    if (!result || !result.ok) {
+      setStatus(result?.message || 'Desktop-Export abgebrochen oder fehlgeschlagen.');
+      return;
+    }
+    setStatus(`Desktop-Druckexport erstellt (${result.count} Datei(en), Profilmodus: ${result.profileMode}).`);
+  } catch (error) {
+    setStatus(`Desktop-Export fehlgeschlagen: ${error.message}`);
+  }
 }
 
 function getMoveStepMm() {
@@ -3815,6 +3925,7 @@ async function handlePhotoInput(files) {
       loaded.push({
         id: crypto.randomUUID(),
         name: file.name,
+        sourcePath: typeof file.path === 'string' ? file.path : null,
         pixelWidth: image.naturalWidth,
         pixelHeight: image.naturalHeight,
         originalWidthMm: pxToMm(image.naturalWidth, dpi),
@@ -4090,6 +4201,7 @@ function saveProject() {
     photos: state.photos.map((photo) => ({
       id: photo.id,
       name: photo.name,
+      sourcePath: photo.sourcePath || null,
       pixelWidth: photo.pixelWidth,
       pixelHeight: photo.pixelHeight,
       originalWidthMm: photo.originalWidthMm,
@@ -4137,6 +4249,7 @@ async function loadProjectFromFile(file) {
     photos.push({
       id: p.id,
       name: p.name,
+      sourcePath: p.sourcePath || null,
       pixelWidth: p.pixelWidth,
       pixelHeight: p.pixelHeight,
       originalWidthMm: p.originalWidthMm,
@@ -4407,6 +4520,10 @@ projectLoadInput.addEventListener('change', async (event) => {
 });
 
 exportPrintPdfBtn.addEventListener('click', () => exportPdf(true));
+if (isDesktopRuntime() && exportProductionDesktopBtn) {
+  exportProductionDesktopBtn.hidden = false;
+  exportProductionDesktopBtn.addEventListener('click', exportDesktopProductionJpeg);
+}
 exportContourPdfBtn.addEventListener('click', () => exportPdf(false));
 exportHotfolderBtn.addEventListener('click', exportToHotfolder);
 

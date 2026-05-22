@@ -1,13 +1,43 @@
 {
   "name": "foto-nestinggenerator",
   "version": "0.3.4",
+  "main": "desktop/main.cjs",
   "private": true,
   "description": "Projekt fuer Foto-Nesting mit Versionierungs-Workflow",
   "scripts": {
+    "desktop:dev": "electron .",
+    "desktop:build": "electron-builder --mac --win --linux",
     "release:add": "node scripts/add-release.js",
     "pdfx:convert": "node scripts/make-pdfx.js"
   },
   "dependencies": {
-    "jspdf": "^2.5.1"
+    "jspdf": "^2.5.1",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "electron": "^31.2.1",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "dev.fl2theo.fotong",
+    "productName": "Foto NG",
+    "files": [
+      "app/**/*",
+      "desktop/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": "dmg"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    }
   }
 }
