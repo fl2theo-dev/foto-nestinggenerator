@@ -2234,15 +2234,26 @@ function applyWhiteBorderToSelected() {
       return;
     }
 
+    const aspect = getPlacementAspectRatio(selected);
     let contentWidth = explicitContentWidthMm > 0 ? explicitContentWidthMm : Math.max(1, baseContentWidth);
     let contentHeight = explicitContentHeightMm > 0 ? explicitContentHeightMm : Math.max(1, baseContentHeight);
 
-    if (explicitContentWidthMm > 0 && explicitContentHeightMm <= 0) {
-      const aspect = getPlacementAspectRatio(selected);
+    if (explicitContentWidthMm > 0 && explicitContentHeightMm > 0) {
+      const fromWidthHeight = explicitContentWidthMm / Math.max(1e-6, aspect);
+      if (fromWidthHeight <= explicitContentHeightMm + 1e-6) {
+        contentWidth = explicitContentWidthMm;
+        contentHeight = fromWidthHeight;
+      } else {
+        contentHeight = explicitContentHeightMm;
+        contentWidth = contentHeight * Math.max(1e-6, aspect);
+      }
+    } else if (explicitContentWidthMm > 0) {
       contentHeight = contentWidth / Math.max(1e-6, aspect);
-    } else if (explicitContentHeightMm > 0 && explicitContentWidthMm <= 0) {
-      const aspect = getPlacementAspectRatio(selected);
+    } else if (explicitContentHeightMm > 0) {
       contentWidth = contentHeight * Math.max(1e-6, aspect);
+    } else {
+      contentWidth = Math.max(1, baseContentWidth);
+      contentHeight = contentWidth / Math.max(1e-6, aspect);
     }
 
     if (targetWidthMm + 1e-6 < contentWidth || targetHeightMm + 1e-6 < contentHeight) {
@@ -2257,10 +2268,39 @@ function applyWhiteBorderToSelected() {
       return;
     }
 
+    const centerX = selected.xMm + selected.widthMm / 2;
+    const centerY = selected.yMm + selected.heightMm / 2;
+    const candidate = {
+      ...selected,
+      xMm: centerX - targetWidthMm / 2,
+      yMm: centerY - targetHeightMm / 2,
+      widthMm: targetWidthMm,
+      heightMm: targetHeightMm
+    };
+    const snapped = findNearestFreePlacement(candidate, page, config, selected.id, {
+      maxRadiusMm: Math.max(targetWidthMm, targetHeightMm) + 180,
+      angleSamples: 24,
+      stepMm: getMoveStepMm()
+    });
+
+    if (!snapped) {
+      Object.assign(selected, previous);
+      if (photo) {
+        photo.whiteBorderMm = previous.whiteBorderMm || 0;
+        photo.whiteBorderMode = previous.whiteBorderMode || 'outside';
+        photo.whiteBorderTargetWidthMm = previous.whiteBorderTargetWidthMm || null;
+        photo.whiteBorderTargetHeightMm = previous.whiteBorderTargetHeightMm || null;
+      }
+      setStatus('Zielgroesse kann nicht platziert werden (kein freier Bereich auf dem Bogen).');
+      return;
+    }
+
+    selected.xMm = snapped.xMm;
+    selected.yMm = snapped.yMm;
     selected.contentWidthMm = contentWidth;
     selected.contentHeightMm = contentHeight;
-    selected.widthMm = targetWidthMm;
-    selected.heightMm = targetHeightMm;
+    selected.widthMm = snapped.widthMm;
+    selected.heightMm = snapped.heightMm;
     selected.whiteBorderTargetWidthMm = targetWidthMm;
     selected.whiteBorderTargetHeightMm = targetHeightMm;
     if (photo) {
@@ -3829,7 +3869,24 @@ function runNesting() {
 }
 
 function getSelectedPlacement() {
-  if (!state.selectedId) return null;
+  if (!state.selectedId) {
+    const currentPage = getCurrentPagePlacements();
+    if (currentPage.length === 1) {
+      const onlyOnCurrentPage = currentPage[0];
+      state.selectedId = onlyOnCurrentPage.id;
+      return onlyOnCurrentPage;
+    }
+
+    const allPlacements = state.pages.flat();
+    if (allPlacements.length === 1) {
+      const only = allPlacements[0];
+      state.selectedId = only.id;
+      const pageIndex = state.pages.findIndex((page) => page.some((item) => item.id === only.id));
+      if (pageIndex >= 0) state.currentPage = pageIndex;
+      return only;
+    }
+    return null;
+  }
   const page = getCurrentPagePlacements();
   const local = page.find((item) => item.id === state.selectedId) || null;
   if (local) return local;
