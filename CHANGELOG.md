@@ -2,6 +2,16 @@
 
 Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 
+## [0.3.4] - 2026-05-22
+
+### Changed
+
+- Barcode zeigt jetzt den Code mit angehaengtem `X`; der Dateiname der Konturdatei bleibt ohne `X`.
+- Profilhandling geschaerft: vorhandene ICC-Profile werden beibehalten; bei gemischten Profilen auf einem Bogen bricht der Export mit Hinweis ab.
+- Motivliste zeigt pro Bild den Hinweis auf das erkannte Farbprofil.
+- Weissrand erweitert um Zielgroessenmodus (Bildgroesse separat von Zielbreite/Zielhoehe, Bild wird im Zielbereich zentriert platziert).
+- App- und Paketversion auf 0.3.4 angehoben.
+
 ## [0.3.3] - 2026-05-22
 
 ### Changed

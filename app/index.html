@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Foto NG [0.3.3]</title>
+  <title>Foto NG [0.3.4]</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
   <header class="topbar">
-    <h1>Foto NG [0.3.3]</h1>
+    <h1>Foto NG [0.3.4]</h1>
     <div class="topbar-links">
       <a href="../docs/index.html">Konzept</a>
     </div>
@@ -135,17 +135,28 @@
                   <input id="menuScaleDpi" type="number" min="1" step="1" />
                 </div>
               </div>
-              <div class="manual-scale-grid-row">
+              <div class="manual-scale-grid-row two-columns">
                 <div class="manual-scale-field">
                   <label for="menuWhiteBorderMode">Weißrand-Modus</label>
                   <select id="menuWhiteBorderMode">
                     <option value="outside">nach außen</option>
                     <option value="inside">nach innen</option>
+                    <option value="target">auf Zielgröße</option>
                   </select>
                 </div>
                 <div class="manual-scale-field">
                   <label for="menuWhiteBorderMm">Weißrand (cm)</label>
                   <input id="menuWhiteBorderMm" type="number" min="0" step="0.1" />
+                </div>
+              </div>
+              <div class="manual-scale-grid-row two-columns">
+                <div class="manual-scale-field">
+                  <label for="menuTargetWidthCm">Zielbreite (cm)</label>
+                  <input id="menuTargetWidthCm" type="number" min="0.1" step="0.1" />
+                </div>
+                <div class="manual-scale-field">
+                  <label for="menuTargetHeightCm">Zielhöhe (cm)</label>
+                  <input id="menuTargetHeightCm" type="number" min="0.1" step="0.1" />
                 </div>
               </div>
               <button id="menuApplyBtn" class="manual-btn manual-apply-btn" title="Änderungen übernehmen">Anwenden</button>

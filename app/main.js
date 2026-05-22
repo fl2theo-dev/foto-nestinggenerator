@@ -56,9 +56,11 @@ const REGMARK_DIAMETER_MM = 5;
 const REGMARK_RADIUS_MM = REGMARK_DIAMETER_MM / 2;
 const REGMARK_OFFSET_MM = 3 + REGMARK_RADIUS_MM;
 const FALLBACK_ADOBE_RGB_ICC_URL = './assets/AdobeRGB1998.icc';
+const FALLBACK_SRGB_ICC_URL = './assets/sRGB.icc';
 const JPEG_ICC_CHUNK_DATA_MAX_BYTES = 65519;
 
 let fallbackAdobeRgbIccBytesPromise = null;
+let fallbackSrgbIccBytesPromise = null;
 
 const CODE39_PATTERNS = {
   '0': 'nnnwwnwnn',
@@ -114,6 +116,10 @@ function generateBarcodeId(length = 10) {
     value += alphabet[Math.floor(Math.random() * alphabet.length)];
   }
   return value;
+}
+
+function getBarcodeTextForRendering(barcodeId) {
+  return `${String(barcodeId || '').toUpperCase()}X`;
 }
 
 function invalidateExportBarcodeId() {
@@ -258,6 +264,57 @@ function isJpegBytes(bytes) {
   return bytes && bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8;
 }
 
+function isPngBytes(bytes) {
+  if (!bytes || bytes.length < 8) return false;
+  const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  for (let i = 0; i < sig.length; i += 1) {
+    if (bytes[i] !== sig[i]) return false;
+  }
+  return true;
+}
+
+function readUint32BE(bytes, offset) {
+  return (
+    (bytes[offset] << 24) |
+    (bytes[offset + 1] << 16) |
+    (bytes[offset + 2] << 8) |
+    bytes[offset + 3]
+  ) >>> 0;
+}
+
+function hasPngSrgbChunk(bytes) {
+  if (!isPngBytes(bytes)) return false;
+  let offset = 8;
+  while (offset + 12 <= bytes.length) {
+    const length = readUint32BE(bytes, offset);
+    const typeOffset = offset + 4;
+    const dataOffset = offset + 8;
+    const chunkEnd = dataOffset + length + 4;
+    if (chunkEnd > bytes.length) break;
+
+    const type = String.fromCharCode(
+      bytes[typeOffset],
+      bytes[typeOffset + 1],
+      bytes[typeOffset + 2],
+      bytes[typeOffset + 3]
+    );
+
+    if (type === 'sRGB') return true;
+    if (type === 'IEND') break;
+    offset = chunkEnd;
+  }
+  return false;
+}
+
+function detectProfileLabelFromIccBytes(iccBytes) {
+  if (!(iccBytes instanceof Uint8Array) || iccBytes.length === 0) return 'Kein Profil';
+  const sample = iccBytes.slice(0, Math.min(iccBytes.length, 32768));
+  const text = new TextDecoder('latin1').decode(sample).toLowerCase();
+  if (text.includes('srgb')) return 'sRGB';
+  if (text.includes('adobe rgb') || text.includes('adobergb')) return 'Adobe RGB';
+  return 'ICC-Profil';
+}
+
 function hasIccSegmentSignature(bytes, start) {
   const signature = [
     0x49, 0x43, 0x43, 0x5f, 0x50, 0x52, 0x4f, 0x46, 0x49, 0x4c, 0x45, 0x00
@@ -352,6 +409,77 @@ function extractIccProfileFromDataUrl(dataUrl) {
   return extractIccProfileFromJpegBytes(bytes);
 }
 
+async function loadFallbackSrgbIccBytes() {
+  if (!fallbackSrgbIccBytesPromise) {
+    fallbackSrgbIccBytesPromise = (async () => {
+      const response = await fetch(FALLBACK_SRGB_ICC_URL, { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error(`sRGB-Fallbackprofil nicht gefunden (${response.status}).`);
+      }
+      const buffer = await response.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      if (bytes.length < 128) {
+        throw new Error('sRGB-Fallbackprofil ist ungueltig.');
+      }
+      return bytes;
+    })();
+  }
+  return fallbackSrgbIccBytesPromise;
+}
+
+async function resolveImportedProfileInfo(file, fileBytes) {
+  const fileName = String(file?.name || '').toLowerCase();
+  const mime = String(file?.type || '').toLowerCase();
+  const isJpeg = mime === 'image/jpeg' || mime === 'image/jpg' || fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') || isJpegBytes(fileBytes);
+
+  if (isJpeg) {
+    const icc = extractIccProfileFromJpegBytes(fileBytes);
+    if (icc) {
+      return {
+        iccProfileBytes: icc,
+        colorProfileLabel: detectProfileLabelFromIccBytes(icc),
+        colorProfileSource: 'embedded-jpeg-icc'
+      };
+    }
+    return {
+      iccProfileBytes: null,
+      colorProfileLabel: 'Kein Profil',
+      colorProfileSource: 'none'
+    };
+  }
+
+  if (isPngBytes(fileBytes) && hasPngSrgbChunk(fileBytes)) {
+    const srgb = await loadFallbackSrgbIccBytes();
+    return {
+      iccProfileBytes: srgb,
+      colorProfileLabel: 'sRGB',
+      colorProfileSource: 'png-srgb-chunk'
+    };
+  }
+
+  return {
+    iccProfileBytes: null,
+    colorProfileLabel: 'Kein Profil',
+    colorProfileSource: 'none'
+  };
+}
+
+function resolveProfileInfoFromDataUrl(dataUrl) {
+  const icc = extractIccProfileFromDataUrl(dataUrl);
+  if (icc) {
+    return {
+      iccProfileBytes: icc,
+      colorProfileLabel: detectProfileLabelFromIccBytes(icc),
+      colorProfileSource: 'embedded-jpeg-icc'
+    };
+  }
+  return {
+    iccProfileBytes: null,
+    colorProfileLabel: 'Kein Profil',
+    colorProfileSource: 'none'
+  };
+}
+
 async function loadFallbackAdobeRgbIccBytes() {
   if (!fallbackAdobeRgbIccBytesPromise) {
     fallbackAdobeRgbIccBytesPromise = (async () => {
@@ -391,10 +519,7 @@ async function resolveIccProfileForPage(page) {
     };
   }
 
-  return {
-    bytes: await loadFallbackAdobeRgbIccBytes(),
-    source: 'fallback-mixed-input-profiles'
-  };
+  throw new Error('Gemischte ICC-Profile auf einem Bogen erkannt. Bitte pro Bogen nur ein einheitliches Farbprofil verwenden.');
 }
 
 function removeIccApp2Segments(jpegBytes) {
@@ -544,6 +669,8 @@ const menuScaleDpi = document.getElementById('menuScaleDpi');
 const menuApplyBtn = document.getElementById('menuApplyBtn');
 const menuWhiteBorderMm = document.getElementById('menuWhiteBorderMm');
 const menuWhiteBorderMode = document.getElementById('menuWhiteBorderMode');
+const menuTargetWidthCm = document.getElementById('menuTargetWidthCm');
+const menuTargetHeightCm = document.getElementById('menuTargetHeightCm');
 const photoOverlay = document.getElementById('photoOverlay');
 const photoOverlayViewport = document.getElementById('photoOverlayViewport');
 const photoOverlayImage = document.getElementById('photoOverlayImage');
@@ -666,7 +793,18 @@ function getConfiguredContentDimensions(item) {
 }
 
 function getWhiteBorderMode(item) {
-  return item?.whiteBorderMode === 'inside' ? 'inside' : 'outside';
+  if (item?.whiteBorderMode === 'inside') return 'inside';
+  if (item?.whiteBorderMode === 'target') return 'target';
+  return 'outside';
+}
+
+function getWhiteTargetDimensions(item) {
+  const widthMm = Number(item?.whiteBorderTargetWidthMm);
+  const heightMm = Number(item?.whiteBorderTargetHeightMm);
+  if (!Number.isFinite(widthMm) || widthMm <= 0 || !Number.isFinite(heightMm) || heightMm <= 0) {
+    return null;
+  }
+  return { widthMm, heightMm };
 }
 
 function getWhiteBorderMm(item) {
@@ -706,6 +844,13 @@ function getWhiteBorderComponentsForContent(item, contentWidthMm, contentHeightM
 }
 
 function getOuterDimensionsForContent(item, contentWidthMm, contentHeightMm) {
+  if (getWhiteBorderMode(item) === 'target') {
+    const target = getWhiteTargetDimensions(item);
+    if (target) {
+      return { widthMm: target.widthMm, heightMm: target.heightMm };
+    }
+  }
+
   const { borderX, borderY } = getWhiteBorderComponentsForContent(item, contentWidthMm, contentHeightMm);
   if (getWhiteBorderMode(item) === 'outside') {
     return {
@@ -730,6 +875,22 @@ function getPlacementOuterDimensions(item) {
 function getPlacementImageRectMm(item) {
   const outer = getPlacementOuterDimensions(item);
   const mode = getWhiteBorderMode(item);
+  if (mode === 'target') {
+    const configured = getConfiguredContentDimensions(item);
+    const photoWidth = Number(item.contentWidthMm) > 0 ? Number(item.contentWidthMm) : configured.widthMm;
+    const photoHeight = Number(item.contentHeightMm) > 0 ? Number(item.contentHeightMm) : configured.heightMm;
+    const clampedPhotoWidth = Math.max(0.1, Math.min(photoWidth, outer.widthMm));
+    const clampedPhotoHeight = Math.max(0.1, Math.min(photoHeight, outer.heightMm));
+    const insetX = Math.max(0, (outer.widthMm - clampedPhotoWidth) / 2);
+    const insetY = Math.max(0, (outer.heightMm - clampedPhotoHeight) / 2);
+    return {
+      xMm: insetX,
+      yMm: insetY,
+      widthMm: clampedPhotoWidth,
+      heightMm: clampedPhotoHeight
+    };
+  }
+
   const border = getWhiteBorderComponentsForContent(item, outer.widthMm, outer.heightMm);
 
   if (mode === 'outside') {
@@ -1662,22 +1823,35 @@ function updateManualScaleControlsForSelected() {
     if (menuScaleDpi) menuScaleDpi.value = '';
     if (menuWhiteBorderMm) menuWhiteBorderMm.value = '';
     if (menuWhiteBorderMode) menuWhiteBorderMode.value = 'outside';
+    if (menuTargetWidthCm) menuTargetWidthCm.value = '';
+    if (menuTargetHeightCm) menuTargetHeightCm.value = '';
     return;
   }
+
+  const mode = getWhiteBorderMode(selected);
+  const displayWidthMm = mode === 'target' && Number(selected.contentWidthMm) > 0
+    ? Number(selected.contentWidthMm)
+    : selected.widthMm;
+  const displayHeightMm = mode === 'target' && Number(selected.contentHeightMm) > 0
+    ? Number(selected.contentHeightMm)
+    : selected.heightMm;
 
   if (menuCurrentSizeValue) {
     menuCurrentSizeValue.textContent = `${(selected.widthMm / MM_PER_CM).toFixed(1)} x ${(selected.heightMm / MM_PER_CM).toFixed(1)} cm`;
   }
-  if (menuScaleWidthCm) menuScaleWidthCm.value = (selected.widthMm / MM_PER_CM).toFixed(1);
-  if (menuScaleHeightCm) menuScaleHeightCm.value = (selected.heightMm / MM_PER_CM).toFixed(1);
+  if (menuScaleWidthCm) menuScaleWidthCm.value = (displayWidthMm / MM_PER_CM).toFixed(1);
+  if (menuScaleHeightCm) menuScaleHeightCm.value = (displayHeightMm / MM_PER_CM).toFixed(1);
 
   const dims = getPlacementPixelDims(selected);
-  const dpiX = dims.pxWidth / (selected.widthMm / MM_PER_INCH);
-  const dpiY = dims.pxHeight / (selected.heightMm / MM_PER_INCH);
+  const dpiX = dims.pxWidth / (Math.max(1e-6, displayWidthMm) / MM_PER_INCH);
+  const dpiY = dims.pxHeight / (Math.max(1e-6, displayHeightMm) / MM_PER_INCH);
   const avgDpi = (dpiX + dpiY) / 2;
   if (menuScaleDpi) menuScaleDpi.value = Number.isFinite(avgDpi) ? String(Math.round(avgDpi)) : '';
   if (menuWhiteBorderMm) menuWhiteBorderMm.value = (getWhiteBorderMm(selected) / MM_PER_CM).toFixed(1);
-  if (menuWhiteBorderMode) menuWhiteBorderMode.value = getWhiteBorderMode(selected);
+  if (menuWhiteBorderMode) menuWhiteBorderMode.value = mode;
+  const target = getWhiteTargetDimensions(selected);
+  if (menuTargetWidthCm) menuTargetWidthCm.value = target ? (target.widthMm / MM_PER_CM).toFixed(1) : '';
+  if (menuTargetHeightCm) menuTargetHeightCm.value = target ? (target.heightMm / MM_PER_CM).toFixed(1) : '';
 }
 
 function applyWhiteBorderToSelected() {
@@ -1689,11 +1863,26 @@ function applyWhiteBorderToSelected() {
 
   const inputValueCm = Math.max(0, Number(menuWhiteBorderMm?.value || 0));
   const inputValueMm = inputValueCm * MM_PER_CM;
-  const inputMode = menuWhiteBorderMode?.value === 'inside' ? 'inside' : 'outside';
+  const inputMode = menuWhiteBorderMode?.value === 'inside'
+    ? 'inside'
+    : (menuWhiteBorderMode?.value === 'target' ? 'target' : 'outside');
+  const targetWidthMm = Math.max(0, Number(menuTargetWidthCm?.value || 0) * MM_PER_CM);
+  const targetHeightMm = Math.max(0, Number(menuTargetHeightCm?.value || 0) * MM_PER_CM);
 
   const hadStoredContent = Number(selected.contentWidthMm) > 0 && Number(selected.contentHeightMm) > 0;
   const baseContentWidth = hadStoredContent ? Number(selected.contentWidthMm) : Number(selected.widthMm);
   const baseContentHeight = hadStoredContent ? Number(selected.contentHeightMm) : Number(selected.heightMm);
+
+  const previous = {
+    widthMm: selected.widthMm,
+    heightMm: selected.heightMm,
+    contentWidthMm: selected.contentWidthMm,
+    contentHeightMm: selected.contentHeightMm,
+    whiteBorderMm: selected.whiteBorderMm,
+    whiteBorderMode: selected.whiteBorderMode,
+    whiteBorderTargetWidthMm: selected.whiteBorderTargetWidthMm,
+    whiteBorderTargetHeightMm: selected.whiteBorderTargetHeightMm
+  };
 
   selected.whiteBorderMm = inputValueMm;
   selected.whiteBorderMode = inputMode;
@@ -1705,21 +1894,64 @@ function applyWhiteBorderToSelected() {
   if (photo) {
     photo.whiteBorderMm = inputValueMm;
     photo.whiteBorderMode = inputMode;
+    photo.whiteBorderTargetWidthMm = null;
+    photo.whiteBorderTargetHeightMm = null;
   }
 
-  if (inputMode === 'outside' && inputValueMm > 0) {
+  if (inputMode === 'target') {
+    if (targetWidthMm <= 0 || targetHeightMm <= 0) {
+      Object.assign(selected, previous);
+      if (photo) {
+        photo.whiteBorderMm = previous.whiteBorderMm || 0;
+        photo.whiteBorderMode = previous.whiteBorderMode || 'outside';
+        photo.whiteBorderTargetWidthMm = previous.whiteBorderTargetWidthMm || null;
+        photo.whiteBorderTargetHeightMm = previous.whiteBorderTargetHeightMm || null;
+      }
+      setStatus('Bitte Zielbreite und Zielhoehe fuer den Weissraum angeben.');
+      return;
+    }
+
+    const contentWidth = Math.max(1, baseContentWidth);
+    const contentHeight = Math.max(1, baseContentHeight);
+    if (targetWidthMm + 1e-6 < contentWidth || targetHeightMm + 1e-6 < contentHeight) {
+      Object.assign(selected, previous);
+      if (photo) {
+        photo.whiteBorderMm = previous.whiteBorderMm || 0;
+        photo.whiteBorderMode = previous.whiteBorderMode || 'outside';
+        photo.whiteBorderTargetWidthMm = previous.whiteBorderTargetWidthMm || null;
+        photo.whiteBorderTargetHeightMm = previous.whiteBorderTargetHeightMm || null;
+      }
+      setStatus('Zielgroesse muss mindestens so gross sein wie die Bildgroesse.');
+      return;
+    }
+
+    selected.contentWidthMm = contentWidth;
+    selected.contentHeightMm = contentHeight;
+    selected.widthMm = targetWidthMm;
+    selected.heightMm = targetHeightMm;
+    selected.whiteBorderTargetWidthMm = targetWidthMm;
+    selected.whiteBorderTargetHeightMm = targetHeightMm;
+    if (photo) {
+      photo.whiteBorderTargetWidthMm = targetWidthMm;
+      photo.whiteBorderTargetHeightMm = targetHeightMm;
+    }
+  } else if (inputMode === 'outside' && inputValueMm > 0) {
     selected.contentWidthMm = Math.max(1, baseContentWidth);
     selected.contentHeightMm = Math.max(1, baseContentHeight);
     selected.widthMm = Math.max(1, selected.contentWidthMm + inputValueMm * 2);
     selected.heightMm = Math.max(1, selected.contentHeightMm + inputValueMm * 2);
+    selected.whiteBorderTargetWidthMm = null;
+    selected.whiteBorderTargetHeightMm = null;
   } else {
     selected.widthMm = Math.max(1, baseContentWidth);
     selected.heightMm = Math.max(1, baseContentHeight);
     selected.contentWidthMm = null;
     selected.contentHeightMm = null;
+    selected.whiteBorderTargetWidthMm = null;
+    selected.whiteBorderTargetHeightMm = null;
   }
 
-  if (inputMode === 'inside') {
+  if (inputMode === 'inside' && photo) {
     ensurePhotoAutoFit(photo, config);
   }
 
@@ -1867,6 +2099,9 @@ function applyScaleToSelected() {
     const borderMm = getWhiteBorderMm(selected);
     selected.contentWidthMm = Math.max(1, selected.widthMm - borderMm * 2);
     selected.contentHeightMm = Math.max(1, selected.heightMm - borderMm * 2);
+  } else if (getWhiteBorderMode(selected) === 'target') {
+    selected.contentWidthMm = Math.max(1, selected.widthMm);
+    selected.contentHeightMm = Math.max(1, selected.heightMm);
   } else {
     selected.contentWidthMm = null;
     selected.contentHeightMm = null;
@@ -2461,6 +2696,7 @@ function createPhotoCardElement(item, index) {
       <div class="photo-line-1">${item.name}</div>
       <div class="photo-line-2">${item.pixelWidth}x${item.pixelHeight} px | Ausgabe ${item.outputWidthCm.toFixed(1)} x ${item.outputHeightCm.toFixed(1)} cm</div>
       <div class="photo-line-3">Auf Seite ${item.onPage || '-'}</div>
+      <div class="photo-line-3">Farbprofil: ${item.colorProfileLabel || 'Kein Profil'}</div>
     </div>
   `;
 
@@ -2662,6 +2898,7 @@ function renderTable() {
     targetWidthCm: getConfiguredContentDimensions(photo).widthMm / 10,
     whiteBorderMm: getWhiteBorderMm(photo),
     whiteBorderMode: getWhiteBorderMode(photo),
+    colorProfileLabel: photo.colorProfileLabel || 'Kein Profil',
     dpi: Number(dpiInput.value) || 300,
     thumbSrc: photo.thumbnailDataUrl || photo.dataUrl,
     isChecked: state.listSelection.has(photo.id)
@@ -2881,7 +3118,7 @@ function drawPlacementPhotoOnCanvas(ctx2d, item, drawOffsetX, drawOffsetY, pxPer
   ctx2d.restore();
 }
 
-async function renderPrintPageAsJpegBlob(page, geometry, barcodeId, dpi, iccProfileBytes) {
+async function renderPrintPageAsJpegBlob(page, geometry, barcodeText, dpi, iccProfileBytes) {
   const pxPerMm = dpi / MM_PER_INCH;
   const widthPx = Math.max(1, Math.round(geometry.widthMm * pxPerMm));
   const heightPx = Math.max(1, Math.round(geometry.heightMm * pxPerMm));
@@ -2911,7 +3148,7 @@ async function renderPrintPageAsJpegBlob(page, geometry, barcodeId, dpi, iccProf
     ctx2d.fill();
   }
 
-  if (barcodeId) {
+  if (barcodeText) {
     const contentTopY = Math.min(...page.map((item) => item.yMm)) + drawOffsetY;
     const contentBottomY = Math.max(...page.map((item) => item.yMm + item.heightMm)) + drawOffsetY;
     const placement = getBarcodePlacementMm(
@@ -2923,7 +3160,7 @@ async function renderPrintPageAsJpegBlob(page, geometry, barcodeId, dpi, iccProf
       geometry,
       { topY: contentTopY, bottomY: contentBottomY }
     );
-    drawCode39BarcodeOnCanvas(ctx2d, barcodeId, placement, pxPerMm);
+    drawCode39BarcodeOnCanvas(ctx2d, barcodeText, placement, pxPerMm);
   }
 
   const jpegBlob = await canvasToJpegBlob(canvas, 0.98);
@@ -2932,7 +3169,7 @@ async function renderPrintPageAsJpegBlob(page, geometry, barcodeId, dpi, iccProf
   return new Blob([withProfile], { type: 'image/jpeg' });
 }
 
-async function buildPrintJpegExports(barcodeId) {
+async function buildPrintJpegExports(barcodeId, barcodeText) {
   if (state.pages.length === 0) {
     setStatus('Kein Layout zum Exportieren vorhanden.');
     return null;
@@ -2950,7 +3187,7 @@ async function buildPrintJpegExports(barcodeId) {
     const profile = await resolveIccProfileForPage(page);
     profileSources.add(profile.source);
 
-    const blob = await renderPrintPageAsJpegBlob(page, geometry, barcodeId, dpi, profile.bytes);
+    const blob = await renderPrintPageAsJpegBlob(page, geometry, barcodeText, dpi, profile.bytes);
     const pageNo = String(index + 1).padStart(2, '0');
     files.push({
       name: `druck_motive_regmarks_${barcodeId}_seite-${pageNo}.jpg`,
@@ -2964,7 +3201,7 @@ async function buildPrintJpegExports(barcodeId) {
   };
 }
 
-function buildPdfDocument(includePhotos, barcodeId) {
+function buildPdfDocument(includePhotos, barcodeText) {
   if (!window.jspdf || !window.jspdf.jsPDF) {
     return null;
   }
@@ -3036,7 +3273,7 @@ function buildPdfDocument(includePhotos, barcodeId) {
       pdf.circle(reg.cx + drawOffsetX, reg.cy + drawOffsetY, reg.r, 'F');
     }
 
-    if (barcodeId) {
+    if (barcodeText) {
       const contentTopY = Math.min(...page.map((item) => item.yMm)) + drawOffsetY;
       const contentBottomY = Math.max(...page.map((item) => item.yMm + item.heightMm)) + drawOffsetY;
       const placement = getBarcodePlacementMm(
@@ -3048,7 +3285,7 @@ function buildPdfDocument(includePhotos, barcodeId) {
         geometry,
         { topY: contentTopY, bottomY: contentBottomY }
       );
-      drawCode39BarcodeOnPdf(pdf, barcodeId, placement);
+      drawCode39BarcodeOnPdf(pdf, barcodeText, placement);
     }
   });
 
@@ -3067,8 +3304,9 @@ function downloadBlob(filename, blob) {
 async function exportPdf(includePhotos) {
   if (includePhotos) {
     const barcodeId = getOrCreateExportBarcodeId();
+    const barcodeText = getBarcodeTextForRendering(barcodeId);
     try {
-      const printExport = await buildPrintJpegExports(barcodeId);
+      const printExport = await buildPrintJpegExports(barcodeId, barcodeText);
       if (!printExport) return;
       for (const file of printExport.files) {
         downloadBlob(file.name, file.blob);
@@ -3077,8 +3315,8 @@ async function exportPdf(includePhotos) {
       const usedFallback = Array.from(printExport.profileSources).some((source) => source.startsWith('fallback'));
       setStatus(
         usedFallback
-          ? `Druck-JPEG exportiert (${printExport.files.length} Datei(en), Fallback-Profil Adobe RGB aktiv, Code: ${barcodeId}).`
-          : `Druck-JPEG exportiert (${printExport.files.length} Datei(en), Profil aus Import uebernommen, Code: ${barcodeId}).`
+            ? `Druck-JPEG exportiert (${printExport.files.length} Datei(en), Fallback-Profil Adobe RGB aktiv, Code: ${barcodeId}, Barcode: ${barcodeText}).`
+            : `Druck-JPEG exportiert (${printExport.files.length} Datei(en), Profil aus Import uebernommen, Code: ${barcodeId}, Barcode: ${barcodeText}).`
       );
     } catch (error) {
       setStatus(`Druck-JPEG Export fehlgeschlagen: ${error.message}`);
@@ -3093,7 +3331,8 @@ async function exportPdf(includePhotos) {
   }
 
   const barcodeId = getOrCreateExportBarcodeId();
-  const pdf = buildPdfDocument(false, barcodeId);
+  const barcodeText = getBarcodeTextForRendering(barcodeId);
+  const pdf = buildPdfDocument(false, barcodeText);
   if (!pdf) return;
   const filename = `${barcodeId}.pdf`;
   const blob = pdf.output('blob');
@@ -3119,8 +3358,9 @@ async function exportToHotfolder() {
   }
 
   const barcodeId = getOrCreateExportBarcodeId();
-  const printJpegs = await buildPrintJpegExports(barcodeId);
-  const contourPdf = buildPdfDocument(false, barcodeId);
+  const barcodeText = getBarcodeTextForRendering(barcodeId);
+  const printJpegs = await buildPrintJpegExports(barcodeId, barcodeText);
+  const contourPdf = buildPdfDocument(false, barcodeText);
   if (!printJpegs || !contourPdf) return;
 
   try {
@@ -3163,7 +3403,7 @@ async function handlePhotoInput(files) {
       const fileBytes = new Uint8Array(await file.arrayBuffer());
       const dataUrl = await fileToDataURL(file);
       const image = await loadImage(dataUrl);
-      const iccProfileBytes = extractIccProfileFromFileBytes(file, fileBytes);
+      const profileInfo = await resolveImportedProfileInfo(file, fileBytes);
 
       loaded.push({
         id: crypto.randomUUID(),
@@ -3179,7 +3419,9 @@ async function handlePhotoInput(files) {
         sizeOverrideSource: null,
         image,
         dataUrl,
-        iccProfileBytes,
+        iccProfileBytes: profileInfo.iccProfileBytes,
+        colorProfileLabel: profileInfo.colorProfileLabel,
+        colorProfileSource: profileInfo.colorProfileSource,
         thumbnailDataUrl: buildThumbnailDataUrl(image),
         cropNorm: { x: 0, y: 0, w: 1, h: 1 }
       });
@@ -3407,7 +3649,7 @@ function unplaceSelected() {
 
 function saveProject() {
   const project = {
-    version: '0.3.0',
+    version: '0.3.4',
     savedAt: new Date().toISOString(),
     config: getConfig(),
     currentPage: state.currentPage,
@@ -3422,6 +3664,10 @@ function saveProject() {
       targetHeightMm: photo.targetHeightMm,
       whiteBorderMm: photo.whiteBorderMm || 0,
       whiteBorderMode: photo.whiteBorderMode || 'outside',
+      whiteBorderTargetWidthMm: photo.whiteBorderTargetWidthMm || null,
+      whiteBorderTargetHeightMm: photo.whiteBorderTargetHeightMm || null,
+      colorProfileLabel: photo.colorProfileLabel || 'Kein Profil',
+      colorProfileSource: photo.colorProfileSource || 'none',
       sizeOverrideSource: photo.sizeOverrideSource || null,
       dataUrl: photo.dataUrl,
       cropNorm: photo.cropNorm || { x: 0, y: 0, w: 1, h: 1 }
@@ -3453,6 +3699,7 @@ async function loadProjectFromFile(file) {
   const photos = [];
   for (const p of project.photos || []) {
     const image = await loadImage(p.dataUrl);
+    const profileInfo = resolveProfileInfoFromDataUrl(p.dataUrl);
     photos.push({
       id: p.id,
       name: p.name,
@@ -3464,10 +3711,14 @@ async function loadProjectFromFile(file) {
       targetHeightMm: p.targetHeightMm,
       whiteBorderMm: p.whiteBorderMm || 0,
       whiteBorderMode: p.whiteBorderMode || 'outside',
+      whiteBorderTargetWidthMm: Number(p.whiteBorderTargetWidthMm) > 0 ? Number(p.whiteBorderTargetWidthMm) : null,
+      whiteBorderTargetHeightMm: Number(p.whiteBorderTargetHeightMm) > 0 ? Number(p.whiteBorderTargetHeightMm) : null,
+      colorProfileLabel: p.colorProfileLabel || profileInfo.colorProfileLabel,
+      colorProfileSource: p.colorProfileSource || profileInfo.colorProfileSource,
       sizeOverrideSource: p.sizeOverrideSource || null,
       dataUrl: p.dataUrl,
       image,
-      iccProfileBytes: extractIccProfileFromDataUrl(p.dataUrl),
+      iccProfileBytes: profileInfo.iccProfileBytes,
       thumbnailDataUrl: buildThumbnailDataUrl(image),
       cropNorm: p.cropNorm || { x: 0, y: 0, w: 1, h: 1 }
     });
@@ -3862,12 +4113,16 @@ if (menuApplyBtn) {
     // Save white border values before they get overwritten by applyScaleToSelected
     const savedBorderMm = Number(menuWhiteBorderMm?.value || 0);
     const savedBorderMode = menuWhiteBorderMode?.value || 'outside';
+    const savedTargetWidthCm = Number(menuTargetWidthCm?.value || 0);
+    const savedTargetHeightCm = Number(menuTargetHeightCm?.value || 0);
     
     applyScaleToSelected();
     
     // Restore white border values from before scale was applied
     if (menuWhiteBorderMm) menuWhiteBorderMm.value = savedBorderMm.toFixed(1);
     if (menuWhiteBorderMode) menuWhiteBorderMode.value = savedBorderMode;
+    if (menuTargetWidthCm) menuTargetWidthCm.value = savedTargetWidthCm > 0 ? savedTargetWidthCm.toFixed(1) : '';
+    if (menuTargetHeightCm) menuTargetHeightCm.value = savedTargetHeightCm > 0 ? savedTargetHeightCm.toFixed(1) : '';
     
     applyWhiteBorderToSelected();
   });

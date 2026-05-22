@@ -1,6 +1,18 @@
 {
   "releases": [
     {
+      "version": "0.3.4",
+      "date": "2026-05-22",
+      "summary": "Barcode-Suffix, Profilbeibehaltung und Zielgroessen-Weissrand erweitert.",
+      "changes": [
+        "Barcode zeigt jetzt den Code mit angehaengtem X; Dateiname der Konturdatei bleibt unveraendert ohne X.",
+        "Farbprofil wird bei vorhandenem Profil beibehalten; bei gemischten Profilen auf einem Bogen wird Export mit Hinweis abgebrochen.",
+        "Unter Motive wird pro Bild ein Profilhinweis angezeigt.",
+        "Neue Weissrandoption Zielgroesse: Bildgroesse plus getrennte Zielbreite/-hoehe fuer zentrierte Platzierung auf erweitertem Cut-Bereich.",
+        "App-Titel und Paketversion auf 0.3.4 aktualisiert."
+      ]
+    },
+    {
       "version": "0.3.3",
       "date": "2026-05-22",
       "summary": "Druckexport auf JPEG mit verbindlicher ICC-Profilfuehrung umgestellt.",

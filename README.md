@@ -25,6 +25,9 @@ Projekt fuer automatisches Foto-Nesting auf Rollenmaterial mit Regmarks und dual
 - Projekt speichern/laden als JSON (inkl. Layout)
 - Hotfolder-Export direkt aus der App (wo Browser-API verfuegbar)
 - Ubuntu-Setup-Skript: `scripts/setup-ubuntu.sh`
+- Barcode wird als Code mit zusaetzlichem `X` dargestellt (Dateiname der Kontur bleibt ohne `X`)
+- Profilhinweis pro Motiv in der Liste
+- Weissrandmodus mit separater Zielgroesse (Bildgroesse + Zielbreite/Zielhoehe)
 
 ## Ubuntu Schnellsetup
 
@@ -40,9 +43,10 @@ Optional mit Auto-Installation:
 
 ## Hochwertiger Druck (lokal, mit ICC)
 
-1. In der App `Druck-JPEG` erzeugen (Profil wird aus Import uebernommen, Fallback: AdobeRGB).
-2. Falls ein PDF/X-Workflow notwendig ist: zunaechst aus JPEG/Pipeline ein PDF erzeugen und dann mit passendem ICC-Profil konvertieren.
-3. Fuer bestehende PDF-Konvertierung via Ghostscript:
+1. In der App `Druck-JPEG` erzeugen (Profil wird aus Import uebernommen, Fallback: AdobeRGB nur ohne eingebettetes Profil).
+2. Bei gemischten Profilen auf demselben Bogen bricht der Export absichtlich ab; Profile bitte vorab vereinheitlichen.
+3. Falls ein PDF/X-Workflow notwendig ist: zunaechst aus JPEG/Pipeline ein PDF erzeugen und dann mit passendem ICC-Profil konvertieren.
+4. Fuer bestehende PDF-Konvertierung via Ghostscript:
 
 ```bash
 npm run pdfx:convert -- --in druck_motive_regmarks.pdf --out druck_pdfx.pdf --icc ./profiles/DEIN_PROFIL.icc
