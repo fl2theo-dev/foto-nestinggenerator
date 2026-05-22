@@ -63,6 +63,11 @@ const REGMARK_OFFSET_MM = 3 + REGMARK_RADIUS_MM;
 const FALLBACK_ADOBE_RGB_ICC_URL = './assets/AdobeRGB1998.icc';
 const FALLBACK_SRGB_ICC_URL = './assets/sRGB.icc';
 const JPEG_ICC_CHUNK_DATA_MAX_BYTES = 65519;
+// Profil-Policy fuer Druck-JPEG-Export:
+// - 'none': kein ICC einbetten (Standard)
+// - 'srgb': sRGB-ICC einbetten
+// - 'source': Quellprofil einbetten (kann bei Canvas-Export zu Farbdifferenzen fuehren)
+const PRINT_JPEG_PROFILE_POLICY = 'none';
 
 let fallbackAdobeRgbIccBytesPromise = null;
 let fallbackSrgbIccBytesPromise = null;
@@ -3546,6 +3551,9 @@ async function renderPrintPageAsJpegBlob(page, geometry, barcodeText, dpi, iccPr
   }
 
   const jpegBlob = await canvasToJpegBlob(canvas, 0.98);
+  if (!(iccProfileBytes instanceof Uint8Array) || iccProfileBytes.length === 0) {
+    return jpegBlob;
+  }
   const jpegBytes = await blobToBytes(jpegBlob);
   const withProfile = embedIccProfileIntoJpegBytes(jpegBytes, iccProfileBytes);
   return new Blob([withProfile], { type: 'image/jpeg' });
@@ -3566,10 +3574,20 @@ async function buildPrintJpegExports(barcodeId, barcodeText) {
   for (let index = 0; index < state.pages.length; index += 1) {
     const page = state.pages[index];
     const geometry = pageGeometries[index];
-    const profile = await resolveIccProfileForPage(page);
-    profileSources.add(profile.source);
+    let profileBytes = null;
+    let profileSource = 'none';
 
-    const blob = await renderPrintPageAsJpegBlob(page, geometry, barcodeText, dpi, profile.bytes);
+    if (PRINT_JPEG_PROFILE_POLICY === 'srgb') {
+      profileBytes = await loadFallbackSrgbIccBytes();
+      profileSource = 'embedded-srgb';
+    } else if (PRINT_JPEG_PROFILE_POLICY === 'source') {
+      const profile = await resolveIccProfileForPage(page);
+      profileBytes = profile.bytes;
+      profileSource = profile.source;
+    }
+    profileSources.add(profileSource);
+
+    const blob = await renderPrintPageAsJpegBlob(page, geometry, barcodeText, dpi, profileBytes);
     const pageNo = String(index + 1).padStart(2, '0');
     files.push({
       name: `druck_motive_regmarks_${barcodeId}_seite-${pageNo}.jpg`,
@@ -3694,12 +3712,19 @@ async function exportPdf(includePhotos) {
         downloadBlob(file.name, file.blob);
       }
 
+      const noProfile = Array.from(printExport.profileSources).every((source) => source === 'none');
+      const srgbEmbedded = Array.from(printExport.profileSources).every((source) => source === 'embedded-srgb');
       const usedFallback = Array.from(printExport.profileSources).some((source) => source.startsWith('fallback'));
-      setStatus(
-        usedFallback
-            ? `Druck-JPEG exportiert (${printExport.files.length} Datei(en), Fallback-Profil Adobe RGB aktiv, Code: ${barcodeId}, Barcode: ${barcodeText}).`
-            : `Druck-JPEG exportiert (${printExport.files.length} Datei(en), Profil aus Import uebernommen, Code: ${barcodeId}, Barcode: ${barcodeText}).`
-      );
+
+      if (noProfile) {
+        setStatus(`Druck-JPEG exportiert (${printExport.files.length} Datei(en), ohne ICC-Einbettung, Code: ${barcodeId}, Barcode: ${barcodeText}).`);
+      } else if (srgbEmbedded) {
+        setStatus(`Druck-JPEG exportiert (${printExport.files.length} Datei(en), sRGB-Profil eingebettet, Code: ${barcodeId}, Barcode: ${barcodeText}).`);
+      } else if (usedFallback) {
+        setStatus(`Druck-JPEG exportiert (${printExport.files.length} Datei(en), Fallback-Profil Adobe RGB aktiv, Code: ${barcodeId}, Barcode: ${barcodeText}).`);
+      } else {
+        setStatus(`Druck-JPEG exportiert (${printExport.files.length} Datei(en), Profil aus Import uebernommen, Code: ${barcodeId}, Barcode: ${barcodeText}).`);
+      }
     } catch (error) {
       setStatus(`Druck-JPEG Export fehlgeschlagen: ${error.message}`);
     }
