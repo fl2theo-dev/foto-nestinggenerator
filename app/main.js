@@ -2269,7 +2269,7 @@ function applyWhiteBorderToSelected() {
         photo.whiteBorderTargetWidthMm = previous.whiteBorderTargetWidthMm || null;
         photo.whiteBorderTargetHeightMm = previous.whiteBorderTargetHeightMm || null;
       }
-      setStatus('Zielgroesse muss mindestens so gross sein wie die Bildgroesse.');
+      setStatus(`Zielgroesse zu klein: Bild ${(contentWidth / MM_PER_CM).toFixed(1)} x ${(contentHeight / MM_PER_CM).toFixed(1)} cm, Ziel ${(targetWidthMm / MM_PER_CM).toFixed(1)} x ${(targetHeightMm / MM_PER_CM).toFixed(1)} cm.`);
       return;
     }
 
@@ -4524,14 +4524,23 @@ if (menuApplyBtn) {
     const savedBorderMode = String(menuWhiteBorderMode?.value ?? 'outside');
     const savedTargetWidthRaw = String(menuTargetWidthCm?.value ?? '');
     const savedTargetHeightRaw = String(menuTargetHeightCm?.value ?? '');
+
+    // Firefox fallback: if target dimensions are filled, enforce target mode
+    // even when select-value updates lag behind click handling.
+    const parsedTargetWidth = parseUiNumber(savedTargetWidthRaw);
+    const parsedTargetHeight = parseUiNumber(savedTargetHeightRaw);
+    const shouldForceTargetMode = parsedTargetWidth > 0 && parsedTargetHeight > 0;
+    const effectiveBorderMode = shouldForceTargetMode
+      ? 'target'
+      : savedBorderMode;
     
-    if (savedBorderMode !== 'target') {
+    if (effectiveBorderMode !== 'target') {
       applyScaleToSelected();
     }
     
     // Restore white border values from before scale was applied
     if (menuWhiteBorderMm) menuWhiteBorderMm.value = savedBorderMmRaw;
-    if (menuWhiteBorderMode) menuWhiteBorderMode.value = savedBorderMode;
+    if (menuWhiteBorderMode) menuWhiteBorderMode.value = effectiveBorderMode;
     if (menuTargetWidthCm) menuTargetWidthCm.value = savedTargetWidthRaw;
     if (menuTargetHeightCm) menuTargetHeightCm.value = savedTargetHeightRaw;
     
