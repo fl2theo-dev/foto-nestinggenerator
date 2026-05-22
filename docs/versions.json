@@ -9,6 +9,7 @@
         "Farbprofil wird bei vorhandenem Profil beibehalten; bei gemischten Profilen auf einem Bogen wird Export mit Hinweis abgebrochen.",
         "Unter Motive wird pro Bild ein Profilhinweis angezeigt.",
         "Neue Weissrandoption Zielgroesse: Bildgroesse plus getrennte Zielbreite/-hoehe fuer zentrierte Platzierung auf erweitertem Cut-Bereich.",
+        "Fix Zielgroesse-Weissrand: Kommawerte bleiben in den Eingaben erhalten und werden korrekt uebernommen; automatische Ratio-Kopplung ist im Zielgroessenmodus deaktiviert.",
         "App-Titel und Paketversion auf 0.3.4 aktualisiert."
       ]
     },

@@ -10,6 +10,7 @@ Alle nennenswerten Aenderungen an diesem Projekt werden hier dokumentiert.
 - Profilhandling geschaerft: vorhandene ICC-Profile werden beibehalten; bei gemischten Profilen auf einem Bogen bricht der Export mit Hinweis ab.
 - Motivliste zeigt pro Bild den Hinweis auf das erkannte Farbprofil.
 - Weissrand erweitert um Zielgroessenmodus (Bildgroesse separat von Zielbreite/Zielhoehe, Bild wird im Zielbereich zentriert platziert).
+- Fix fuer Zielgroessenmodus: Komma-Eingaben werden korrekt uebernommen und die automatische Ratio-Kopplung ueberschreibt im Zielmodus keine Werte mehr.
 - App- und Paketversion auf 0.3.4 angehoben.
 
 ## [0.3.3] - 2026-05-22

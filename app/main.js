@@ -765,6 +765,12 @@ function pxToMm(px, dpi) {
   return (px / dpi) * MM_PER_INCH;
 }
 
+function parseUiNumber(value) {
+  const normalized = String(value ?? '').trim().replace(',', '.');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
 function getMoveStepMm() {
   return Math.max(1, Number(moveStepInput?.value || 0) || 5);
 }
@@ -1861,15 +1867,15 @@ function applyWhiteBorderToSelected() {
     return;
   }
 
-  const inputValueCm = Math.max(0, Number(menuWhiteBorderMm?.value || 0));
+  const inputValueCm = Math.max(0, parseUiNumber(menuWhiteBorderMm?.value || 0) || 0);
   const inputValueMm = inputValueCm * MM_PER_CM;
   const inputMode = menuWhiteBorderMode?.value === 'inside'
     ? 'inside'
     : (menuWhiteBorderMode?.value === 'target' ? 'target' : 'outside');
-  const targetWidthMm = Math.max(0, Number(menuTargetWidthCm?.value || 0) * MM_PER_CM);
-  const targetHeightMm = Math.max(0, Number(menuTargetHeightCm?.value || 0) * MM_PER_CM);
-  const explicitContentWidthMm = Math.max(0, Number(menuScaleWidthCm?.value || 0) * MM_PER_CM);
-  const explicitContentHeightMm = Math.max(0, Number(menuScaleHeightCm?.value || 0) * MM_PER_CM);
+  const targetWidthMm = Math.max(0, (parseUiNumber(menuTargetWidthCm?.value || 0) || 0) * MM_PER_CM);
+  const targetHeightMm = Math.max(0, (parseUiNumber(menuTargetHeightCm?.value || 0) || 0) * MM_PER_CM);
+  const explicitContentWidthMm = Math.max(0, (parseUiNumber(menuScaleWidthCm?.value || 0) || 0) * MM_PER_CM);
+  const explicitContentHeightMm = Math.max(0, (parseUiNumber(menuScaleHeightCm?.value || 0) || 0) * MM_PER_CM);
 
   const hadStoredContent = Number(selected.contentWidthMm) > 0 && Number(selected.contentHeightMm) > 0;
   const baseContentWidth = hadStoredContent ? Number(selected.contentWidthMm) : Number(selected.widthMm);
@@ -1969,7 +1975,11 @@ function applyWhiteBorderToSelected() {
   updateManualScaleControlsForSelected();
   
   drawPreview();
-  setStatus('Weissrand uebernommen.');
+  if (inputMode === 'target') {
+    setStatus(`Weissraum uebernommen: Bild ${(selected.contentWidthMm / MM_PER_CM).toFixed(1)} x ${(selected.contentHeightMm / MM_PER_CM).toFixed(1)} cm in Ziel ${(selected.widthMm / MM_PER_CM).toFixed(1)} x ${(selected.heightMm / MM_PER_CM).toFixed(1)} cm.`);
+  } else {
+    setStatus('Weissrand uebernommen.');
+  }
 }
 
 function updateOversizeEditor() {
@@ -1992,10 +2002,11 @@ function updateOversizeEditor() {
 function syncScaleInputsByRatio(changedAxis) {
   const selected = getSelectedPlacement();
   if (!selected) return;
+  if ((menuWhiteBorderMode?.value || '') === 'target') return;
   const ratio = getPlacementAspectRatio(selected);
 
-  const w = Number(menuScaleWidthCm?.value || 0);
-  const h = Number(menuScaleHeightCm?.value || 0);
+  const w = parseUiNumber(menuScaleWidthCm?.value || 0) || 0;
+  const h = parseUiNumber(menuScaleHeightCm?.value || 0) || 0;
 
   if (changedAxis === 'width' && w > 0 && menuScaleHeightCm) {
     menuScaleHeightCm.value = (w / ratio).toFixed(1);
@@ -2038,8 +2049,8 @@ function applyScaleToSelected() {
   const page = getCurrentPagePlacements();
   const config = getConfig();
 
-  const targetWidthCm = Number(menuScaleWidthCm?.value || 0);
-  const targetHeightCm = Number(menuScaleHeightCm?.value || 0);
+  const targetWidthCm = parseUiNumber(menuScaleWidthCm?.value || 0) || 0;
+  const targetHeightCm = parseUiNumber(menuScaleHeightCm?.value || 0) || 0;
   const targetDpi = Number(menuScaleDpi?.value || 0);
 
   let targetWidthMm = targetWidthCm > 0 ? targetWidthCm * MM_PER_CM : null;
@@ -2506,8 +2517,8 @@ function openCropOverlayForSelected() {
     return;
   }
 
-  const tw = Number(menuScaleWidthCm?.value || 0) || (selected.widthMm / MM_PER_CM);
-  const th = Number(menuScaleHeightCm?.value || 0) || (selected.heightMm / MM_PER_CM);
+  const tw = parseUiNumber(menuScaleWidthCm?.value || 0) || (selected.widthMm / MM_PER_CM);
+  const th = parseUiNumber(menuScaleHeightCm?.value || 0) || (selected.heightMm / MM_PER_CM);
 
   if (cropTargetWidthCm) cropTargetWidthCm.value = tw.toFixed(1);
   if (cropTargetHeightCm) cropTargetHeightCm.value = th.toFixed(1);
@@ -4122,20 +4133,20 @@ if (menuCropBtn) {
 if (menuApplyBtn) {
   menuApplyBtn.addEventListener('click', () => {
     // Save white border values before they get overwritten by applyScaleToSelected
-    const savedBorderMm = Number(menuWhiteBorderMm?.value || 0);
-    const savedBorderMode = menuWhiteBorderMode?.value || 'outside';
-    const savedTargetWidthCm = Number(menuTargetWidthCm?.value || 0);
-    const savedTargetHeightCm = Number(menuTargetHeightCm?.value || 0);
+    const savedBorderMmRaw = String(menuWhiteBorderMm?.value ?? '');
+    const savedBorderMode = String(menuWhiteBorderMode?.value ?? 'outside');
+    const savedTargetWidthRaw = String(menuTargetWidthCm?.value ?? '');
+    const savedTargetHeightRaw = String(menuTargetHeightCm?.value ?? '');
     
     if (savedBorderMode !== 'target') {
       applyScaleToSelected();
     }
     
     // Restore white border values from before scale was applied
-    if (menuWhiteBorderMm) menuWhiteBorderMm.value = savedBorderMm.toFixed(1);
+    if (menuWhiteBorderMm) menuWhiteBorderMm.value = savedBorderMmRaw;
     if (menuWhiteBorderMode) menuWhiteBorderMode.value = savedBorderMode;
-    if (menuTargetWidthCm) menuTargetWidthCm.value = savedTargetWidthCm > 0 ? savedTargetWidthCm.toFixed(1) : '';
-    if (menuTargetHeightCm) menuTargetHeightCm.value = savedTargetHeightCm > 0 ? savedTargetHeightCm.toFixed(1) : '';
+    if (menuTargetWidthCm) menuTargetWidthCm.value = savedTargetWidthRaw;
+    if (menuTargetHeightCm) menuTargetHeightCm.value = savedTargetHeightRaw;
     
     applyWhiteBorderToSelected();
   });
