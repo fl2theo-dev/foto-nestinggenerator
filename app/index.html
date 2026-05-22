@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Foto NG [0.3.4 | build ac6c351]</title>
+  <title>Foto NG [0.3.4 | build ui-profile-switch]</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
   <header class="topbar">
-    <h1>Foto NG [0.3.4 | build ac6c351]</h1>
+    <h1>Foto NG [0.3.4 | build ui-profile-switch]</h1>
     <div class="topbar-links">
       <a href="../docs/index.html">Konzept</a>
     </div>
@@ -76,7 +76,17 @@
         <button id="exportContourPdfBtn">Export Kontur-PDF</button>
         <button id="exportHotfolderBtn" class="secondary">Export in Hotfolder</button>
       </div>
-      <p class="hint">Druck wird als JPEG exportiert (ICC-Profil aus Import, bei Bedarf AdobeRGB-Fallback). Kontur bleibt PDF. Fuer Produktions-Workflow bitte "Export in Hotfolder" nutzen.</p>
+      <div class="row">
+        <div>
+          <label for="exportProfileMode">JPEG-Farbprofil</label>
+          <select id="exportProfileMode">
+            <option value="none" selected>Ohne ICC einbetten</option>
+            <option value="srgb">sRGB einbetten</option>
+            <option value="source">Quellprofil einbetten</option>
+          </select>
+        </div>
+      </div>
+      <p class="hint">Druck wird als JPEG exportiert. Modus "Ohne ICC" ist im Browser oft am stabilsten. Kontur bleibt PDF. Fuer Produktions-Workflow bitte "Export in Hotfolder" nutzen.</p>
 
       <p id="status" class="status">Keine Fotos geladen.</p>
     </section>
@@ -256,6 +266,6 @@
   </div>
 
   <script src="../node_modules/jspdf/dist/jspdf.umd.min.js"></script>
-  <script type="module" src="./main.js?v=ac6c351"></script>
+  <script type="module" src="./main.js?v=ui-profile-switch"></script>
 </body>
 </html>

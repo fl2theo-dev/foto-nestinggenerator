@@ -28,7 +28,7 @@ function getSheetRegmarks(page, config, pageHeightMm = config.maxHeight) {
   ];
 }
 let jsPdfLoadPromise = null;
-const APP_BUILD_ID = 'ac6c351';
+const APP_BUILD_ID = 'ui-profile-switch';
 
 if (typeof console !== 'undefined' && typeof console.info === 'function') {
   console.info(`Foto NG Build: ${APP_BUILD_ID}`);
@@ -63,11 +63,7 @@ const REGMARK_OFFSET_MM = 3 + REGMARK_RADIUS_MM;
 const FALLBACK_ADOBE_RGB_ICC_URL = './assets/AdobeRGB1998.icc';
 const FALLBACK_SRGB_ICC_URL = './assets/sRGB.icc';
 const JPEG_ICC_CHUNK_DATA_MAX_BYTES = 65519;
-// Profil-Policy fuer Druck-JPEG-Export:
-// - 'none': kein ICC einbetten (Standard)
-// - 'srgb': sRGB-ICC einbetten
-// - 'source': Quellprofil einbetten (kann bei Canvas-Export zu Farbdifferenzen fuehren)
-const PRINT_JPEG_PROFILE_POLICY = 'none';
+const DEFAULT_PRINT_JPEG_PROFILE_POLICY = 'none';
 
 let fallbackAdobeRgbIccBytesPromise = null;
 let fallbackSrgbIccBytesPromise = null;
@@ -965,6 +961,7 @@ const projectLoadInput = document.getElementById('projectLoadInput');
 const exportPrintPdfBtn = document.getElementById('exportPrintPdfBtn');
 const exportContourPdfBtn = document.getElementById('exportContourPdfBtn');
 const exportHotfolderBtn = document.getElementById('exportHotfolderBtn');
+const exportProfileMode = document.getElementById('exportProfileMode');
 const prevPageBtn = document.getElementById('prevPageBtn');
 const nextPageBtn = document.getElementById('nextPageBtn');
 const pageIndicator = document.getElementById('pageIndicator');
@@ -1082,6 +1079,12 @@ function parseUiNumber(value) {
   const normalized = String(value ?? '').trim().replace(',', '.');
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function getPrintJpegProfilePolicy() {
+  const value = String(exportProfileMode?.value || DEFAULT_PRINT_JPEG_PROFILE_POLICY).toLowerCase();
+  if (value === 'srgb' || value === 'source' || value === 'none') return value;
+  return DEFAULT_PRINT_JPEG_PROFILE_POLICY;
 }
 
 function getMoveStepMm() {
@@ -3566,6 +3569,7 @@ async function buildPrintJpegExports(barcodeId, barcodeText) {
   }
 
   const config = getConfig();
+  const profilePolicy = getPrintJpegProfilePolicy();
   const dpi = Number(config.dpi) || 300;
   const pageGeometries = state.pages.map((page) => getPdfPageGeometry(page, config));
   const files = [];
@@ -3577,10 +3581,10 @@ async function buildPrintJpegExports(barcodeId, barcodeText) {
     let profileBytes = null;
     let profileSource = 'none';
 
-    if (PRINT_JPEG_PROFILE_POLICY === 'srgb') {
+    if (profilePolicy === 'srgb') {
       profileBytes = await loadFallbackSrgbIccBytes();
       profileSource = 'embedded-srgb';
-    } else if (PRINT_JPEG_PROFILE_POLICY === 'source') {
+    } else if (profilePolicy === 'source') {
       const profile = await resolveIccProfileForPage(page);
       profileBytes = profile.bytes;
       profileSource = profile.source;
@@ -3701,6 +3705,18 @@ function downloadBlob(filename, blob) {
   URL.revokeObjectURL(url);
 }
 
+function getPrintProfileStatusText(profileSources) {
+  const sources = Array.from(profileSources || []);
+  const noProfile = sources.every((source) => source === 'none');
+  const srgbEmbedded = sources.every((source) => source === 'embedded-srgb');
+  const usedFallback = sources.some((source) => source.startsWith('fallback'));
+
+  if (noProfile) return 'ohne ICC-Einbettung';
+  if (srgbEmbedded) return 'sRGB-Profil eingebettet';
+  if (usedFallback) return 'Fallback-Profil Adobe RGB aktiv';
+  return 'Profil aus Import uebernommen';
+}
+
 async function exportPdf(includePhotos) {
   if (includePhotos) {
     const barcodeId = getOrCreateExportBarcodeId();
@@ -3711,20 +3727,8 @@ async function exportPdf(includePhotos) {
       for (const file of printExport.files) {
         downloadBlob(file.name, file.blob);
       }
-
-      const noProfile = Array.from(printExport.profileSources).every((source) => source === 'none');
-      const srgbEmbedded = Array.from(printExport.profileSources).every((source) => source === 'embedded-srgb');
-      const usedFallback = Array.from(printExport.profileSources).some((source) => source.startsWith('fallback'));
-
-      if (noProfile) {
-        setStatus(`Druck-JPEG exportiert (${printExport.files.length} Datei(en), ohne ICC-Einbettung, Code: ${barcodeId}, Barcode: ${barcodeText}).`);
-      } else if (srgbEmbedded) {
-        setStatus(`Druck-JPEG exportiert (${printExport.files.length} Datei(en), sRGB-Profil eingebettet, Code: ${barcodeId}, Barcode: ${barcodeText}).`);
-      } else if (usedFallback) {
-        setStatus(`Druck-JPEG exportiert (${printExport.files.length} Datei(en), Fallback-Profil Adobe RGB aktiv, Code: ${barcodeId}, Barcode: ${barcodeText}).`);
-      } else {
-        setStatus(`Druck-JPEG exportiert (${printExport.files.length} Datei(en), Profil aus Import uebernommen, Code: ${barcodeId}, Barcode: ${barcodeText}).`);
-      }
+      const profileStatus = getPrintProfileStatusText(printExport.profileSources);
+      setStatus(`Druck-JPEG exportiert (${printExport.files.length} Datei(en), ${profileStatus}, Code: ${barcodeId}, Barcode: ${barcodeText}).`);
     } catch (error) {
       setStatus(`Druck-JPEG Export fehlgeschlagen: ${error.message}`);
     }
@@ -3788,12 +3792,8 @@ async function exportToHotfolder() {
       await writable.close();
     }
 
-    const usedFallback = Array.from(printJpegs.profileSources).some((source) => source.startsWith('fallback'));
-    setStatus(
-      usedFallback
-        ? `Hotfolder-Export abgeschlossen (${files.length} Dateien geschrieben, Druck als JPEG mit Adobe-RGB-Fallback, Kontur: ${barcodeId}.pdf).`
-        : `Hotfolder-Export abgeschlossen (${files.length} Dateien geschrieben, Druck als JPEG mit uebernommenem Import-Profil, Kontur: ${barcodeId}.pdf).`
-    );
+    const profileStatus = getPrintProfileStatusText(printJpegs.profileSources);
+    setStatus(`Hotfolder-Export abgeschlossen (${files.length} Dateien geschrieben, Druck-JPEG: ${profileStatus}, Kontur: ${barcodeId}.pdf).`);
   } catch (error) {
     setStatus(`Hotfolder-Export abgebrochen/fehlgeschlagen: ${error.message}`);
   }
